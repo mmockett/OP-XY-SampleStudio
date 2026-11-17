@@ -130,25 +130,40 @@ board, not the audio board.
 
 ## Installing
 
-Sample Studio needs firmware built with an SDK that has Sample Studio in it.
-No firmware is published here: you build your own from your own OP-XY's OS.
+Sample Studio is an extension: you build it into firmware with an Open-XY SDK
+that has the `sample_studio` capability. No firmware is published here: you
+build your own from your own OP-XY's OS.
 [docs/install.md](docs/install.md) covers it step by step: copying the OS from
 your OP-XY, building, copying the build over, writing the OS, and going back to
 stock.
 
-The extension is the `sample_studio/` folder. It holds only its record; the
-editor itself is the SDK's.
+The extension is the `sample_studio/` folder: the editor (`editor.cpp`), the
+player (`player.cpp`), the render chain (`studio_dsp.hpp`, `bake.hpp`) and the
+page artwork (`sample_studio.svg`). It uses only the SDK's Sample Studio
+services, and holds no firmware address.
 
 ## Develop
 
-The screens above are drawn by the studio's own code: `tools/screens` builds it
-in a Linux container with stock calls stubbed, sets each scene, and renders the
-frames in the OP-XY's screen font.
+The tests check the editor and player against the SDK's services and the
+render chain against an exact Python reference, sample for sample. They need an
+Open-XY checkout with the capability beside this one, or `OPEN_XY` set to it:
 
 ```sh
-tools/screens/run.sh <open-xy checkout with Sample Studio> out
-XY_FONT=<UniversNextPro-Light.ttf> python3 tools/screens/render.py <open-xy checkout> out
+cd tests
+OPEN_XY=../../open-xy python3 -m unittest test_sample_studio
 ```
+
+The screens above are drawn by the studio's own code: `tools/screens` builds it
+in a Linux container against stand-in SDK services, sets each scene, and renders
+the frames in the OP-XY's screen font.
+
+```sh
+tools/screens/run.sh <open-xy checkout> out
+XY_FONT=<UniversNextPro-Light.ttf> python3 tools/screens/render.py out
+```
+
+The page artwork's bindings, `sample_studio/panel.hpp`, are generated from the
+SVG by `tools/panel.py`.
 
 ## Licence
 

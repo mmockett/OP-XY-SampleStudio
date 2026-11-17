@@ -11,13 +11,13 @@ which has more detail on each.
 
 - An OP-XY running OS 1.2.1, and a USB cable.
 - Python 3.11 or newer, and git.
-- The Open-XY SDK with Sample Studio in it. Until it is part of the SDK's
-  `staging` branch, it is on the `sdk/sample-studio` branch of
+- The Open-XY SDK with the `sample_studio` capability. Until it is part of the
+  SDK's `staging` branch, it is on the `sdk/sample-studio-capability` branch of
   [mmockett/open-xy](https://github.com/mmockett/open-xy).
 - This repository, beside the SDK.
 
 ```sh
-git clone -b sdk/sample-studio https://github.com/mmockett/open-xy
+git clone -b sdk/sample-studio-capability https://github.com/mmockett/open-xy
 git clone https://github.com/mmockett/OP-XY-SampleStudio
 cd open-xy
 python sdk.py toolchain fetch

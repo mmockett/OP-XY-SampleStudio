@@ -1,7 +1,7 @@
 name: Checks
-# Checks the extension against the Open-XY SDK that carries Sample Studio: the record, the
-# studio's own tests, and a firmware compile with the pinned Blackfin tools beside the SDK's
-# probe sample engine. No stock files or device.
+# Checks the extension against the Open-XY SDK with the sample_studio capability: the SDK's
+# extension checks, the studio's own tests, and a firmware compile with the pinned Blackfin
+# tools beside the SDK's probe sample engine. No stock files or device.
 on:
   push:
     branches: [main]
@@ -11,9 +11,9 @@ on:
 permissions:
   contents: read
 env:
-  # The SDK with Sample Studio, until it is part of etcetc000/open-xy staging.
+  # The SDK with the sample_studio capability, until it is part of etcetc000/open-xy staging.
   OPEN_XY_REPOSITORY: mmockett/open-xy
-  OPEN_XY_REF: sdk/sample-studio
+  OPEN_XY_REF: sdk/sample-studio-capability
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -36,7 +36,9 @@ jobs:
       - name: Extension checks
         run: python open-xy/sdk.py test --extension studio/sample_studio --cxx clang++ --host-cxx g++
       - name: Sample Studio's tests
-        working-directory: open-xy/tests
+        working-directory: studio/tests
+        env:
+          OPEN_XY: ${{ github.workspace }}/open-xy
         run: python -m unittest test_sample_studio
   firmware:
     # The pinned Blackfin tools run on Windows x86_64 and macOS arm64.

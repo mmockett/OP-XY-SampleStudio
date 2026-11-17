@@ -1,34 +1,13 @@
-// Sample Studio's screens, drawn by its own code on Linux (Dockerfile): the SDK's sample_studio.cpp
-// with stock calls stubbed (stock_host.hpp) and stock memory as zeroed pages, each scene's state
-// set by hand, then page() fills the retained frame, written out raw for render.py.
-#include <sys/mman.h>
+// Sample Studio's screens, drawn by its own code on Linux (Dockerfile): the extension's editor
+// against stand-in SDK services (services.cpp), each scene's state set by hand, then page() fills
+// the retained frame, written out raw for render.py.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstdint>
-#include "sample_studio.cpp"
+#include "services.cpp"
+#include "editor.cpp"
 
-extern "C" {
-// The library's own handlers the studio falls back to; never reached here.
-u32 sdk_sample_studio_stock_press(unsigned char*, const u32*) { return 0; }
-u32 sdk_sample_studio_stock_shift_press(unsigned char*, const u32*) { return 0; }
-u32 sdk_sample_studio_stock_release(unsigned char*, u32) { return 0; }
-void sdk_sample_studio_stock_turn(unsigned char*, u32, const i32*) {}
-void sdk_sample_studio_stock_frame(void*, i32) {}
-}
-const u32 sdk_sample_studio_label __asm__("sdk_sample_studio_label") = 1;
-// Other platform units' services the studio calls; never reached in a drawn frame.
-u32 sdk_sample_ui_engine(u32) __asm__("sdk_sample_ui_engine");
-u32 sdk_sample_ui_engine(u32) { return 0; }
-u32 sdk_sample_cache_stock_hash(const char*) __asm__("sdk_sample_cache_stock_hash");
-u32 sdk_sample_cache_stock_hash(const char*) { return 0; }
-void sdk_sample_cache_sample_release(u32) __asm__("sdk_sample_cache_sample_release");
-void sdk_sample_cache_sample_release(u32) {}
-
-
-namespace opxy { namespace platform { bool harness_shift; }}
-
-namespace {
+namespace opxy { namespace extensions { namespace sample_studio { namespace edit { namespace scenes {
 // A two-bar drum loop at 120 BPM, synthesised here: kick, snare, hats. 44.1 kHz stereo.
 const u32 kRate = 44100, kLoop = kRate * 4;
 opxy::i16 loop_pcm[kLoop * 2];
@@ -96,7 +75,7 @@ void open_scene(Page page, u32 row = 0) {
     axis_moving = false;   // the output's length eases on the device; here each scene starts settled
     axis_frames = 0;
     clear_card();
-    opxy::platform::harness_shift = false;
+    harness::shift = false;
     studio.mode = kOpen;
     studio.page = page;
     studio.row = row;
@@ -140,19 +119,7 @@ void write(const char* folder, const char* name) {
     std::fclose(f);
     std::printf("%s\n", name);
 }
-// Stock's memory as zeroed pages, where the studio reads it (selected track, note map, globals).
-void map(u32 at, u32 bytes) {
-    void* p = mmap(reinterpret_cast<void*>(static_cast<uintptr_t>(at)), bytes, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-    if (p == MAP_FAILED) { std::perror("mmap"); std::exit(1); }
-}
-}  // namespace
-
-int main(int argc, char** argv) {
-    const char* out = argc > 1 ? argv[1] : ".";
-    map(0x08000000u, 0x01000000u);
-    map(0x84000000u, 0x03000000u);
-    map(0x11900000u, 0x00100000u);
+void draw_all(const char* out) {
     make_loop();
     load_loop();
 
@@ -211,7 +178,7 @@ int main(int argc, char** argv) {
 
     // Shift held: undo, compare, play, save.
     open_scene(kTrim);
-    opxy::platform::harness_shift = true;
+    harness::shift = true;
     write(out, "07-shift");
 
     // Save slices on a drum track: where they go.
@@ -230,5 +197,10 @@ int main(int argc, char** argv) {
     studio.mode = kSaving;
     set_card("printing the fx live", "35 s max; sample stops", 0);
     write(out, "09-printing");
+}
+}}}}}  // namespace opxy::extensions::sample_studio::edit::scenes
+
+int main(int argc, char** argv) {
+    opxy::extensions::sample_studio::edit::scenes::draw_all(argc > 1 ? argv[1] : ".");
     return 0;
 }

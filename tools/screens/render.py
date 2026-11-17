@@ -4,7 +4,7 @@ retained frame (sdk/browser/display.mjs SvgDisplay): each mutable path's points,
 transform and paint, each text slot. Text in the OP-XY's screen font, Univers Next Pro Light:
 set XY_FONT to its file (it is never committed). PNGs need Google Chrome.
 
-    XY_FONT=<font.ttf> python3 render.py <open-xy checkout> <out folder> [scale]
+    XY_FONT=<font.ttf> python3 render.py <out folder> [scale]
 """
 import os
 import pathlib
@@ -16,6 +16,9 @@ import xml.etree.ElementTree as ET
 
 CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 SVG = 'http://www.w3.org/2000/svg'
+# The SDK's drawing surface (opxy/sample_studio.hpp studio::Surface): its capacities, which the frame's
+# layout follows; the artwork's own IDs fill the first slots.
+SURFACE_PATHS, SURFACE_NODES, SURFACE_TEXTS = 32, 96, 32
 ET.register_namespace('', SVG)
 
 
@@ -40,9 +43,9 @@ def render(svg_text, frame, paths, points, nodes, texts, palette):
     by_id = {e.get('id'): e for e in root.iter() if e.get('id')}
     words = struct.unpack('<%di' % (len(frame) // 4), frame)
     stride = 1 + 2 * points
-    nodes_at = max(paths, 1) * stride
-    texts_at = nodes_at + 7 * len(nodes)
-    assert len(words) == texts_at + 9 * len(texts) + 8, 'frame size'
+    nodes_at = SURFACE_PATHS * stride
+    texts_at = nodes_at + 7 * SURFACE_NODES
+    assert len(words) == texts_at + 9 * SURFACE_TEXTS + 8, 'frame size'
     paint = []
     for pid in palette:
         e = by_id[pid]
@@ -75,14 +78,14 @@ def render(svg_text, frame, paths, points, nodes, texts, palette):
 
 
 def main():
-    sdk, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-    scale = int(sys.argv[3]) if len(sys.argv) > 3 else 2
+    out = pathlib.Path(sys.argv[1])
+    scale = int(sys.argv[2]) if len(sys.argv) > 2 else 2
     font = os.environ.get('XY_FONT')
     if not font or not pathlib.Path(font).is_file():
         sys.exit('set XY_FONT to UniversNextPro-Light.ttf')
-    platform = sdk / 'sdk/platform/opxy-1.2.1'
-    paths, points, nodes, texts, palette = bindings(platform / 'sample_studio_panel.hpp')
-    svg_text = (platform / 'sample_studio_panel.svg').read_text()
+    extension = pathlib.Path(__file__).resolve().parents[2] / 'sample_studio'
+    paths, points, nodes, texts, palette = bindings(extension / 'panel.hpp')
+    svg_text = (extension / 'sample_studio.svg').read_text()
     width, height = 480, 222
     (out / 'svg').mkdir(parents=True, exist_ok=True)
     (out / 'png').mkdir(parents=True, exist_ok=True)
