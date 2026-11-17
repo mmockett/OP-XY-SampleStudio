@@ -1,0 +1,10 @@
+# Firmware, stock files and build outputs stay out: build your own from your own OP-XY.
+*.ldr
+*.tfw
+os.ldr
+builds/
+candidate/
+stock-*/
+*.ttf
+*.otf
+.DS_Store
