@@ -1,5 +1,7 @@
 # OP-XY Sample Studio
 
+![Sample Studio's pages: trim, trim reversed, slice, retime, process, the Shift row, save slices and a print](media/screens.gif)
+
 A sample editor inside the OP-XY's sample library. Trim, slice, retime and
 process a sample, hear each change on the keys as you turn, then save the
 result as a new file beside the original, as slices, or as a new drum kit.
@@ -136,6 +138,17 @@ stock.
 
 The extension is the `sample_studio/` folder. It holds only its record; the
 editor itself is the SDK's.
+
+## Develop
+
+The screens above are drawn by the studio's own code: `tools/screens` builds it
+in a Linux container with stock calls stubbed, sets each scene, and renders the
+frames in the OP-XY's screen font.
+
+```sh
+tools/screens/run.sh <open-xy checkout with Sample Studio> out
+XY_FONT=<UniversNextPro-Light.ttf> python3 tools/screens/render.py <open-xy checkout> out
+```
 
 ## Licence
 
