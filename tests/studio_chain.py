@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sample Studio's whole render chain, stage 3: an exact integer transcription of
-the device's sample_studio_dsp.hpp and of sample_studio.cpp's writer.
+the device's studio_dsp.hpp and of editor.cpp's writer.
 
     python3 studio_chain.py in.wav out.wav [--start F] [--end F] [--reverse]
         [--gain DB | --normalise DB] [--dc] [--fade-in MS] [--fade-out MS] [--chans keep|mono|L|R]
@@ -34,7 +34,7 @@ RATE_HZ = [0, 32000, 24000, 16000, 12000, 8000, 6000, 4000, 2000]
 BITS = [16, 12, 10, 8, 6, 5, 4, 3, 2]
 LEVEL_GAIN = [R.db_to_q28(d) for d in range(-30, 21)]
 NORMAL_TARGET = [int(math.floor(32767 * 10 ** (t / 20))) for t in (0, -1, -3, -6)]
-# sample-studio-017: the filter sweep, bits on a level-following step, comp (sample_studio_dsp.hpp).
+# The filter sweep, bits on a level-following step, comp (studio_dsp.hpp).
 SWEEP_HALF = 0x2CCCCCCD
 SWEEP_LIMIT = 1 << 30
 BITS_RELEASE, BITS_FLOOR = 12, 1 << 16
@@ -84,7 +84,7 @@ def mul31(a, b):
     return sat((a * b) >> 31)
 
 
-# Drive (sample-studio-006), sample_studio_dsp.hpp drive_word: gain 1 + 5 drive/100,
+# Drive, studio_dsp.hpp drive_word: gain 1 + 5 drive/100,
 # the tanh-shaped t(v) = v (27 + v^2) / (27 + 9 v^2) held at +-1 from |v| = 3, then
 # makeup 1 - 0.3 drive/100. All 32-bit, the division to 20 bits.
 DRIVE_GAIN_STEP, DRIVE_MAKEUP_STEP, DRIVE_BITS = 13421772, 6442450, 20
@@ -108,7 +108,7 @@ def drive_word(x, drive):
         r = abs(n)
         if r >= dn:
             r = dn - 1
-        # sample-studio-018: 1/dn from the reciprocal table, interpolated (sample_studio_dsp.hpp)
+        # 1/dn from the reciprocal table, interpolated (studio_dsp.hpp)
         at = dn - DRIVE_RECIP_BASE
         index = at >> 20
         high, low = DRIVE_RECIP[index], DRIVE_RECIP[index + 1]
@@ -184,7 +184,7 @@ MAX_GRAIN_MS = 160
 
 
 def grain_ms_for(s):
-    """sample_studio_dsp.hpp grain_ms_for (sample-studio-009): the grain grown with compression."""
+    """studio_dsp.hpp grain_ms_for: the grain grown with compression."""
     page = max(20, min(120, s.grain_ms))
     ratio = SEMITONE_Q16[max(-24, min(24, s.pitch)) + 24]
     percent = (s.stretch * ratio) >> 16
@@ -195,7 +195,7 @@ def grain_ms_for(s):
 
 
 class Pipeline:
-    """sample_studio_dsp.hpp's Pipeline, line for line."""
+    """studio_dsp.hpp's Pipeline, line for line."""
 
     def __init__(self, data, channels, rate, s):
         self.data, self.channels, self.rate, self.s = data, channels, rate, s
@@ -246,7 +246,7 @@ class Pipeline:
         return x * 65536 if s.gain == Q28 else gain_word(x, s.gain)
 
     def probe(self, i):
-        # both channels of a stereo source (sample-studio-008), 12 bits
+        # both channels of a stereo source, 12 bits
         if self.channels > 1:
             return (self.at(i, 0) >> 21) + (self.at(i, 1) >> 21)
         return self.at(i, 0) >> 20
@@ -392,8 +392,8 @@ class Pipeline:
             w[1] = w[0]
 
     def fill(self, n):
-        """sample_studio_dsp.hpp fill(): up to n frames, the colour stage a step across the block at a
-        time (sample-studio-018), as two lists (left, right)."""
+        """studio_dsp.hpp fill(): up to n frames, the colour stage a step across the block at a
+        time, as two lists (left, right)."""
         l, r = [], []
         for _ in range(n):
             w = self.timed()
@@ -507,7 +507,7 @@ MAX_FRAMES = 882000
 
 def render(sample, s, level=0, normal=0, fade_in=0, fade_out=0, chans='keep', slices=None, chop_fade=0,
            seed=0x9E3779B9):
-    """sample_studio.cpp's render: the 16-bit frames out, as lists of tuples
+    """editor.cpp's render: the 16-bit frames out, as lists of tuples
     (one list, or one per slice)."""
     data = [tuple(w >> 16 for w in row) for row in sample.frames]
     channels, rate = sample.channels, sample.rate

@@ -1,4 +1,4 @@
-"""Sample Studio's page artwork (private; OP-XY-Dev drafts/sample-editor.md §0).
+"""Sample Studio's page artwork.
 
 Writes, into the extension (sample_studio/):
   sample_studio.svg   installed as content/display/sample_studio.svg
@@ -22,19 +22,19 @@ OUT = ROOT / "sample_studio"
 POINTS = 64
 
 # Mutable paths first (the frame reshapes them), in this order.
-# sample-studio-021 (Max on 020: "three ... divets independent of zoom"): a waveform quarter is two
-# thin ribbons, its top edge (dim, lit) and its bottom edge (dimlo, litlo), so no outline closes
-# across the waveform where two quarters meet.
+# A waveform quarter is two thin ribbons, its top edge (dim, lit) and its bottom edge
+# (dimlo, litlo), so no outline closes across the waveform where two quarters meet and
+# no dents show between them at any zoom.
 PATHS = (["dim0", "dim1", "dim2", "dim3", "lit0", "lit1", "lit2", "lit3"] +
          [f"dimlo{i}" for i in range(4)] + [f"litlo{i}" for i in range(4)] +
          ["strip0", "strip1", "bracket", "progress"] +
-         # sample-studio-012: the render's progress (red) and its finish (green), filled copies of the
+         # the render's progress (red) and its finish (green), filled copies of the
          # waveform drawn beneath its outline
          [f"red{i}" for i in range(4)] + [f"green{i}" for i in range(4)])
 # Fixed outlines the frame only moves.
 FIXED = (["bg", "bar0", "bar1", "bar2", "bar3", "bar4", "bar5", "bar6", "bar7", "start", "end",
           "tab0", "tab1", "tab2", "tab3", "card", "track", "playhead", "zero0", "zero1"] + [f"cut{i}" for i in range(23)])
-PAGES = ["trim", "slice", "retime", "process"]   # Max, 2026-11-14 (was trim, chop, time, color)
+PAGES = ["trim", "slice", "retime", "process"]   # M1..M4
 # The file line's alert text ("about to render", "rendering", "loading the render"): red, as stock
 # marks recording. Text colour comes from the artwork, so this slot is authored red (assumed value).
 RED = "#FF3020"
@@ -145,7 +145,7 @@ def svg():
     for i in range(23):
         node(f"cut{i}", "M-0.3,-54 L0.3,-54 L0.3,54 L-0.3,54 Z", "#9A9A9A", "#9A9A9A", 0.3)
     marker = "M-0.6,-56 L0.6,-56 L0.6,56 L3,56 L3,62 L-3,62 L-3,56 L-0.6,56 Z"
-    # the playhead: a 1 px line over the stage (sample-studio-010)
+    # the playhead: a 1 px line over the stage
     node("playhead", "M-0.5,-54 L0.5,-54 L0.5,54 L-0.5,54 Z", "#FFFFFF", "#FFFFFF", 0.1)
     node("start", marker, "#FFFFFF", "#FFFFFF", 0.3)
     node("end", marker, "#FFFFFF", "#FFFFFF", 0.3)

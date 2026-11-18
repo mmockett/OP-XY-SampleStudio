@@ -33,7 +33,7 @@ API = ROOT / 'sdk/include/opxy/sample_studio.hpp'
 HOST = PLATFORM / 'sample_studio_host.cpp'
 AUDIO = PLATFORM / 'sample_studio_audio.cpp'
 REFERENCE = REPO / 'tests'   # the exact Python reference of the render chain
-# The five sites: address, the stock bytes, the entry and its trampoline (firmware notes §2, §3).
+# The five sites: address, the stock bytes, the entry and its trampoline.
 SITES = {
     '0x8c0a330a': ('083200e80000f505', 'sdk_sample_studio_press', 'sdk_sample_studio_stock_press'),
     '0x8c0a2be4': ('00e80000f405a66f', 'sdk_sample_studio_shift_press', 'sdk_sample_studio_stock_shift_press'),
@@ -42,7 +42,7 @@ SITES = {
     '0x8d55341c': ('00e80e00e305666f', 'sdk_sample_studio_frame', 'sdk_sample_studio_stock_frame'),
 }
 # Stock functions the studio calls, each already used by the SDK, bounce phase 1,
-# the library's completion or the slicer (firmware notes §2).
+# the library's completion or the slicer.
 KNOWN = {'8fed0348', '8fed0780', '8fed00ae', '8c040bd8', '8c040c24', '8c042efc', '8c03e6f4', '8c048788',
          '8c03e9c8', '8d4d2910', '8d549168', '8d4dd728', '8d589370', '8d5be3a0', '8d58938c', '8d5893bc',
          '8d589ac0', '8d589b8c', '8d520ce0', '8d5fe884', '8d51fcd4', '8c0867f0', '8c0bd5bc',
@@ -65,7 +65,7 @@ KNOWN = {'8fed0348', '8fed0780', '8fed00ae', '8c040bd8', '8c040c24', '8c042efc',
 
 
 def scale_frames(a, n, length):
-    """sample_studio.cpp scale_frames, with each 32-bit product checked."""
+    """editor.cpp scale_frames, with each 32-bit product checked."""
     if not length or n == length:
         return a
     if a >= length:
@@ -301,7 +301,7 @@ def header_tables():
 
 
 def device_bake(R, frames16, rate, channels, begin, end, reverse, level, normal, dc, fade_in, fade_out, chans):
-    """sample_studio.cpp first_job, chain and write_slice, transcribed."""
+    """editor.cpp first_job, chain and write_slice, transcribed."""
     gains, targets, _ = header_tables()
     n = end - begin
     if channels < 2:
@@ -351,7 +351,7 @@ def device_bake(R, frames16, rate, channels, begin, end, reverse, level, normal,
 
 
 class Preview(unittest.TestCase):
-    """sample-studio-004: Max's run of 003 (previews not swapping in, silence)."""
+    """Previews: each render swaps in under a fresh name and plays."""
 
     def test_preview_names_are_never_reused(self):
         text = STUDIO.read_text()
@@ -366,7 +366,7 @@ class Preview(unittest.TestCase):
         self.assertIn('maybe_check(t);\n    maybe_render(t);', text)
 
     def test_pcm_borrowed_without_stocks_wanted_test(self):
-        # 003: stock's acquire refused the key's own sample in the library 78 times in 78
+        # stock's acquire refuses the key's own sample while the library is open (A14)
         text = STUDIO.read_text()
         self.assertNotIn('sdk_sample_cache_sample_acquire(', text)
         self.assertIn('const host::Borrowed h = host::borrow(key);', text)
@@ -377,7 +377,7 @@ class Preview(unittest.TestCase):
         self.assertNotIn('"still loading"', text)
 
     def test_every_file_change_tells_stock_to_gather(self):
-        # 005: renders reached the key only at the next encoder turn; compare did nothing (now: saves, undo, kits)
+        # without the flag a file reaches the key only at the next encoder turn (A15); saves, undo and kits set it
         text = STUDIO.read_text()
         self.assertIn('const u32 kSamplesChanged = 0x840a052d;', HOST.read_text())
         self.assertIn('host::samples_changed();', text)
@@ -386,7 +386,7 @@ class Preview(unittest.TestCase):
         self.assertEqual([c for c in calls if ',' not in c], [], 'every table send says whether a file changed')
 
     def test_the_key_is_untouched_while_editing_and_stale_renders_stop(self):
-        # Max after 012: the key strictly untouched; the studio streams its previews (A16, A19)
+        # the key stays strictly untouched; the studio streams its previews (A16, A19)
         text = STUDIO.read_text()
         for gone in ('stage_preview', 'spare_slot', 'through_key', 'void assign_preview(', 'void write_markers('):
             self.assertNotIn(gone, text)
@@ -406,14 +406,14 @@ class Preview(unittest.TestCase):
             self.assertLessEqual(abs(scale(a, n, length) - want), max(16, want // 4000), (a, n, length))
 
     def test_first_waveform_gets_a_new_geometry_key(self):
-        # 007: blank until the first encoder turn: the placeholders and the first waveform shared key 1
+        # sharing key 1 with the placeholders, the first waveform stays blank until the first encoder turn
         text = STUDIO.read_text()
         body = re.search(r'if \(!paths_ready\) \{(.*?)\n    \}', text, re.S).group(1)
         self.assertIn('++path_key;', body.split('paths_ready = true;')[1])
         self.assertIn('"waveform drawn: key %d', text)
 
     def test_stretch_reads_as_playback_speed(self):
-        # Max on 009: "x1.42 is SLOWER than x1. Let's ensure it represents speed of the sample playback"
+        # the stretch readout is playback speed: x1.42 is faster than x1
         speed = lambda stretch: (10000 + stretch // 2) // stretch
         self.assertEqual([speed(x) for x in (25, 50, 70, 100, 200, 400)], [400, 200, 143, 100, 50, 25])
         text = STUDIO.read_text()
@@ -421,7 +421,7 @@ class Preview(unittest.TestCase):
         self.assertIn('e.stretch = step_by(e.stretch, -detents,', text)   # clockwise: shorter, faster
 
     def test_saves_wait_for_a_preview_and_name_their_folder(self):
-        # Max on 009: "Not sure where exports even go? ... maybe it hadn't finished rendering?"
+        # a save waits for its preview to finish, and its card names the folder it went to
         text = STUDIO.read_text()
         body = re.search(r'void start_save\(\) \{(.*?)\n\}', text, re.S).group(1)
         self.assertIn('studio.save_pending = true;', body)
@@ -447,8 +447,8 @@ class Preview(unittest.TestCase):
                 self.assertLess(ms * (rate // 10), 1 << 32)
 
     def test_output_pages_resize_then_fit_with_one_waveform(self):
-        # Max on 011: "don't show two overlapping waveforms, just show the waveform adjust in size
-        # proportionally ... Once render is complete, the sample smoothly resizes to fit"
+        # one waveform, never two overlapping: it resizes in proportion as the length changes,
+        # then eases to fit once the render is complete (A20)
         text = STUDIO.read_text()
         stage = re.search(r'void output_stage\(\) \{(.*?)\n\}', text, re.S).group(1)
         self.assertNotIn('N_DIM0', stage)
@@ -474,7 +474,7 @@ class Preview(unittest.TestCase):
         self.assertEqual(bars, list(range(bars[0], bars[0] + 8)))
 
     def test_saves_write_their_whole_length(self):
-        # 009's log: a x0.54 save of a 701,049-frame source stopped at 882,000 frames (the preview limit)
+        # a x0.54 save of a 701,049-frame source must not stop at 882,000 frames (the preview limit)
         text = STUDIO.read_text()
         self.assertIn('u32 frame_limit() { return render.target == kToPreview ? kMaxFrames : kSaveMaxFrames; }', text)
         self.assertIn('render.length >= frame_limit()) {', text)   # the count pass stops at the target's limit
@@ -491,7 +491,7 @@ class Preview(unittest.TestCase):
                 self.assertEqual(at, n * q16 >> 16, (n, q16))
 
     def test_frame_scaling_is_exact_to_the_save_limit(self):
-        # the output estimate mapped f * (src / 64 + 1), past 2^32 once sources passed ~6 s (009's waveform)
+        # mapping f * (src / 64 + 1) would pass 2^32 once sources pass ~6 s
         text = STUDIO.read_text()
         self.assertIn('const u32 s0 = scale_frames(f0, src_len, n), s1 = scale_frames(f1, src_len, n);', text)
         for a, n, length in ((648470, 701049, 1296940), (1296940, 701049, 1296940), (3999999, 882000, 4000000),
@@ -500,7 +500,7 @@ class Preview(unittest.TestCase):
             self.assertLessEqual(abs(scale_frames(a, n, length) - want), max(64, want // 256), (a, n, length))
 
     def test_notes_play_the_edit_and_the_track_is_held_silent(self):
-        # Max on 014: the keys played the filtered original; they now play the edit (A22, P7)
+        # the keys play the edit, not the filtered original through the track (A22, P7)
         studio = STUDIO.read_text()
         player = PLAYER.read_text()
         send = (PLATFORM / 'drum_send.cpp').read_text()
@@ -528,13 +528,13 @@ class Preview(unittest.TestCase):
         self.assertIn('sampleStudio', profile['services']['drum_sends'])
 
     def test_play_while_rendering_level_and_one_bar(self):
-        # Max on 014/015: play what's rendered so far, as segment files; one progress bar; the key's level (A23, P4, P8)
+        # play what's rendered so far, as segment files; one progress bar; the key's level (A23, P4, P8)
         studio = STUDIO.read_text()
         player = PLAYER.read_text()
         segment = re.search(r'bool next_segment\(\) \{(.*?)\n\}', studio, re.S).group(1)
         self.assertIn('file_close(render.file);', segment)
         self.assertIn('segment_path(path, sizeof path, render.final_path, render.segments);', segment)
-        self.assertNotIn('r+b', segment)                                       # no reopen-append (015)
+        self.assertNotIn('r+b', segment)                                       # no reopen-append: its seek doesn't hold
         self.assertNotIn('send_grow', segment)                                 # B3 only from the GUI task
         self.assertNotIn('0x8fed06cc', studio)
         self.assertIn('return flush_chunk() && next_segment();', studio)
@@ -565,7 +565,7 @@ class Preview(unittest.TestCase):
             self.assertLessEqual(values[-1], 65536)
 
     def test_a_note_off_stops_like_a_gate(self):
-        # Max on 015: "lifting your finger off the pad doesn't stop the sample"
+        # lifting a finger off the pad stops the sample
         studio = STUDIO.read_text()
         player = PLAYER.read_text()
         follow = re.search(r'void follow_notes\(u32 t\) \{(.*?)\n\}', studio, re.S).group(1)
@@ -594,7 +594,7 @@ class Preview(unittest.TestCase):
         sent = sorted(set(int(x) for x in re.findall(r'b3\((\d+),', studio)))
         self.assertEqual(sent, list(range(138, 153)))   # 150..152: the real-time bounce (A29, P11)   # 145: the hold (A22, P7); 146, 147: the growing preview (A23, P8); 148, 149: the live chain (A24, P9)
         self.assertLess(body.index('if (id == kHold) {'), body.index('if (id < kBegin || id > kCommit) return;'))
-        # the loader (Max: "Audio chip load"): stock's background worker, the sample pool, never the block
+        # the loader on the audio board: stock's background worker, the sample pool, never the block
         self.assertIn('host::post(load_step, nullptr);', player)
         block = re.search(r'void master\(i32\* left, i32\* right\) \{(.*?)\n\}', player, re.S).group(1)
         for forbidden in ('open_file', 'read_file', 'pool_alloc', 'pool_free', 'post_load', 'log_line'):
@@ -626,7 +626,7 @@ class Preview(unittest.TestCase):
         for name in ('lint_fx_offline', 'lint_fx_id', 'fx_block', 'render.fx_on', 'tail_frames'):
             self.assertNotIn(name, studio)
         self.assertIn('bool wants_bounce(const Edit& e) { return e.send1 || e.send2; }', studio)
-        self.assertIn('const char* y[4] = {"fx i", "fx ii", "tail", "comp"};', studio)   # Max's 017 layout
+        self.assertIn('const char* y[4] = {"fx i", "fx ii", "tail", "comp"};', studio)   # A25's layout
         self.assertIn('for (u32 k = 0; k < 2 && target == kToSave; ++k) {', studio)      # a rendered save is dry
         self.assertIn('append(second, sizeof second, m, effect_name(dry_engine));', studio)
         # A29: a stock effect on a send bounces in real time; the audio board captures and writes
@@ -756,7 +756,7 @@ class Stage3(unittest.TestCase):
         self.assertTrue(all(-32768 <= v <= 32767 for row in out for v in row))
 
     def test_full_scale_at_max_drive_is_loud_and_never_wraps(self):
-        # Max on 005: "Drive creates so much clipping that it actually ends up mostly silent"
+        # full drive is loud and dirty, never so clipped that it ends up mostly silent
         class Sine:
             channels, rate = 1, 44100
         rms = lambda v: math.sqrt(sum(x * x for x in v) / len(v))
@@ -803,7 +803,7 @@ class Stage3(unittest.TestCase):
         return (len(z) - 1) * rate / (z[-1] - z[0])
 
     def test_time_stretch_on_stereo_and_mono_at_both_rates(self):
-        # Max on 007: "timestretching doesn't work at all": x0.5, x2 and +-7 semitones, tape and beat,
+        # x0.5, x2 and +-7 semitones, tape and beat,
         # stereo and mono, 44.1 and 48 kHz: length, pitch on both channels, no splice jumps
         for rate in (44100, 48000):
             for channels in (1, 2):
@@ -824,7 +824,7 @@ class Stage3(unittest.TestCase):
                         self.assertFalse(any(abs(v[i] - v[i - 1]) > lim for i in range(1, len(v))), (rate, channels, kw, c))
 
     def test_beat_grain_grows_with_compression(self):
-        # 007's log: Max took stretch to 25% (175,518 of 701,049 frames); 40 ms grains gave 20 ms slices of every 80 ms
+        # at stretch 25% (175,518 of 701,049 frames), 40 ms grains would give 20 ms slices of every 80 ms
         S = self.C.Settings
         for kw, want in ((dict(), 40), (dict(stretch=25), 160), (dict(stretch=50), 80), (dict(stretch=80), 50),
                          (dict(pitch=-12), 80), (dict(stretch=200, pitch=-12), 40), (dict(pitch=12), 40),
@@ -901,7 +901,7 @@ if __name__ == '__main__':
 
 
 def tape_frames(length, stretch):
-    """sample_studio.cpp tape_frames, in its 32-bit parts."""
+    """editor.cpp tape_frames, in its 32-bit parts."""
     if stretch in (0, 100):
         return length
     speed = 6553600 // stretch
@@ -931,8 +931,8 @@ class Live(unittest.TestCase):
 
     def live(self, data, channels, rate, kw, level=0, normal=0, fade_in=0, fade_out=0, chans='keep', region=None,
              chop_fade=0):
-        """What the player plays: sample_studio_player.cpp live_block over 64-frame blocks, the settings
-        sample_studio.cpp live_values sends (as words, before the key's level)."""
+        """What the player plays: player.cpp live_block over 64-frame blocks, the settings
+        editor.cpp live_values sends (as words, before the key's level)."""
         C = self.C
         st = C.Settings(**kw)
         st.beat = 0                                     # the receiver's commit forces tape
@@ -1095,7 +1095,7 @@ class Live(unittest.TestCase):
         self.assertIn('const u32 kLiveParams = 19;', studio)
 
     def test_the_unrolled_drive_division_is_the_long_division(self):
-        # sample_studio_dsp.hpp's branch-free step (016) against the loop it replaced, bit for bit
+        # studio_dsp.hpp's branch-free step against the plain long-division loop, bit for bit
         dsp = (EXT / 'studio_dsp.hpp').read_text()
         self.assertIn('r -= dn & (0u - bit);', dsp)
         self.assertIn('q = (q << 1) | bit;', dsp)
@@ -1121,8 +1121,8 @@ class Live(unittest.TestCase):
             self.assertEqual(q, (r0 << 20) // dn)
 
 
-class Bugs016(unittest.TestCase):
-    """Max on sample-studio-016: each bug reproduced on 016's arithmetic, then gone on 017's."""
+class ChainFixes(unittest.TestCase):
+    """Filter, bits, playhead and comp: each failure reproduced on the naive arithmetic, then shown gone on the chain's."""
     @classmethod
     def setUpClass(cls):
         sys.path.insert(0, str(REFERENCE))
@@ -1157,9 +1157,9 @@ class Bugs016(unittest.TestCase):
         mean = sum(words) / len(words)
         return math.sqrt(sum((x - mean) ** 2 for x in words) / len(words))
 
-    def test_016_filter_latched_at_full_resonance_and_the_sweep_never_does(self):
+    def test_filter_at_full_resonance_and_its_sweep_never_latch(self):
         C = self.C
-        # 016's state-variable filter (cutoff index 48, 12 kHz; resonance 100) on loud input
+        # an unclamped state-variable filter (cutoff index 48, 12 kHz; resonance 100) on loud input
         f, half = C.CUTOFF_Q31[47], 0x7FFFFFFF - (0x79999999 // 100) * 100
         low = band = 0
         stuck = 0
@@ -1172,8 +1172,8 @@ class Bugs016(unittest.TestCase):
                 high = C.sat(C.sat(w + C.wrap(-low)) + C.wrap(-C.sat(damp + damp)))
                 band = C.sat(band + C.mul31(f, high))
             stuck += low == C.I32_MIN
-        self.assertGreater(stuck, 15000)                       # pinned at -1.0: the sound stops (016)
-        # 017's sweep: every cutoff both ways on full-scale square and loud noise, then silence: it never pins
+        self.assertGreater(stuck, 15000)                       # pinned at -1.0: the sound stops
+        # the sweep: every cutoff both ways on full-scale square and loud noise, then silence: it never pins
         square = [(32767, 32767) if (i // 50) % 2 else (-32768, -32768) for i in range(2205)]
         for sweep in list(range(-48, 0, 6)) + [-1, 1] + list(range(6, 49, 6)) + [-48, 48]:
             for data in (square, self.signal(2205, 32767)):
@@ -1186,14 +1186,14 @@ class Bugs016(unittest.TestCase):
         self.assertIn('low[c] = sweep_clamp(sat_add(low[c], mul31(f, band[c])));', dsp)
         self.assertIn('const i32 x = w[c] >> 2;', dsp)
 
-    def test_016_bits_5_and_4_fell_silent_and_017_keeps_them_sounding(self):
+    def test_bits_5_and_4_keep_sounding(self):
         C = self.C
         quiet = self.signal(441000, 3000)                      # 10 s at about -21 dBFS
         decaying = self.signal(441000, 30000, decay=2.0)       # loud, falling to about -95 dB over 10 s
         for b in (5, 6):                                       # 5 and 4 bits
             bits = C.BITS[b]
             step = 1 << (32 - bits)
-            # 016's mask: a decaying sample under one step by its third second: one or two values, silence
+            # a plain mask: a decaying sample under one step by its third second: one or two values, silence
             old = [((x << 16) & ~(step - 1) & 0xFFFFFFFF) for x, _ in decaying[2 * 44100:3 * 44100]]
             self.assertLessEqual(len(set(old)), 2, bits)
             for data, name in ((quiet, 'quiet'), (decaying, 'decaying')):
@@ -1216,7 +1216,7 @@ class Bugs016(unittest.TestCase):
         self.assertIn('w[c] = static_cast<i32>(static_cast<u32>(sat_add(w[c], half)) & mask);', dsp)
         self.assertIn("if (m > bits_env) bits_env = m;", dsp)
 
-    def test_016_playhead_raced_on_a_render_under_way(self):
+    def test_playhead_holds_on_a_render_under_way(self):
         studio = STUDIO.read_text()
         head = re.search(r'void playhead\(u32 t\) \{(.*?)\n\}', studio, re.S).group(1)
         self.assertLess(head.index('if (play.growing) {'), head.index('scale_frames(at, n, studio.preview_frames'))
@@ -1241,8 +1241,8 @@ class Bugs016(unittest.TestCase):
         self.assertGreater(b / a, 3000 / 30000 * 2)   # the 20 dB gap is squeezed
 
 
-class Speed018(unittest.TestCase):
-    """sample-studio-018: the block form and the cheaper drive, against the frame-by-frame chain."""
+class BlockForm(unittest.TestCase):
+    """The block form and the cheaper drive, against the frame-by-frame chain."""
     @classmethod
     def setUpClass(cls):
         sys.path.insert(0, str(REFERENCE))
@@ -1312,7 +1312,7 @@ class Speed018(unittest.TestCase):
             for i in range(-4096, 4096):
                 x = i << 19
                 worst = max(worst, abs(C.drive_word(x, drive) - old(x, drive)))
-        self.assertEqual(worst, 0)                 # 016's curve exactly: the remainder makes the quotient exact
+        self.assertEqual(worst, 0)                 # the long division's curve exactly: the remainder makes the quotient exact
         rnd = random.Random(18)
         M32 = 0xFFFFFFFF
         for _ in range(200000):                    # the quotient alone, all over dn's range, edges included
@@ -1332,8 +1332,8 @@ class Speed018(unittest.TestCase):
         self.assertEqual([int(v.strip().rstrip('u')) for v in body.replace('\n', ' ').split(',') if v.strip()], C.DRIVE_RECIP)
 
 
-class Review018(unittest.TestCase):
-    """The fresh-eyes review's findings on 018, pinned."""
+class BounceReview(unittest.TestCase):
+    """Review findings on the real-time bounce, pinned."""
     def test_a_finished_bounce_never_holds_the_next_play(self):
         player = PLAYER.read_text()
         free = re.search(r'void bounce_free\(\) \{(.*?)\n\}', player, re.S).group(1)
@@ -1362,8 +1362,8 @@ class Review018(unittest.TestCase):
         self.assertIn('end_bounce("print stopped", "nothing saved");', studio)               # Sample stops a print
 
 
-class EditLabel020(unittest.TestCase):
-    """Max on 019: on a drum sampler or multisampler, "shift: edit" sat over stock's arrow on M1. The label
+class EditLabel(unittest.TestCase):
+    """On a drum sampler or multisampler, "shift: edit" would sit over stock's arrow on M1. The label
     shows there only while Shift is held, and never reads "shift: edit"."""
 
     def test_label_only_with_shift_on_drum_and_multi(self):
@@ -1374,8 +1374,8 @@ class EditLabel020(unittest.TestCase):
         self.assertEqual(body.count('m_label('), 1)
 
 
-class Fixes021(unittest.TestCase):
-    """Max on 020: the highlighted file on drum and multi, the filter's direction and readouts, the waveform's
+class HighlightAndFilter(unittest.TestCase):
+    """The highlighted file on drum and multi, the filter's direction and readouts, the waveform's
     seams, the retime render kept under live colour, and each pad playing its slice."""
 
     def body(self, signature):
@@ -1471,9 +1471,10 @@ class Fixes021(unittest.TestCase):
         self.assertIn('studio.edit.slice = kept;', follow)
 
 
-class NewKit019(unittest.TestCase):
+class NewKit(unittest.TestCase):
     """A30: the slices as a new drum kit preset: stock's empty kit with regions as stock's kit zebra.json has them."""
-    EMPTY_KIT = Path.home() / 'Documents/GitHub/OP-XY-Dev/media/sample-editor/stock-empty-kit'
+    # an empty user kit pulled from a device (its /presets/snapshot folder), when STUDIO_EMPTY_KIT names one
+    EMPTY_KIT = Path(os.environ.get('STUDIO_EMPTY_KIT', '/nonexistent'))
 
     # zebra.json's keys, as stock writes them (sorted); its regions carry "gain" only when not 0
     TOP = ['engine', 'envelope', 'fx', 'lfo', 'octave', 'platform', 'regions', 'type', 'version']
@@ -1529,10 +1530,10 @@ class NewKit019(unittest.TestCase):
             self.assertLess(len(card) - 2, 24, card)                               # fits a card line
 
     def test_no_slices_is_stocks_own_empty_kit(self):
-        # Max's empty kit, as stock wrote it (/presets/snapshot/2026-11-15 (1).preset/patch.json)
+        # an empty user kit, as stock writes it (/presets/snapshot/<date> (n).preset/patch.json)
         found = sorted(self.EMPTY_KIT.glob('*.preset/patch.json'))
         if not found:
-            self.skipTest('the pulled empty kit is not on this machine')
+            self.skipTest('STUDIO_EMPTY_KIT is not set to an empty kit pulled from a device')
         self.assertEqual(self.patch([]), found[0].read_text())                   # byte for byte
 
     def test_paths_fit(self):
@@ -1543,8 +1544,8 @@ class NewKit019(unittest.TestCase):
         self.assertIn('kPresetFolder[] = "/fat32/presets/snapshot";', STUDIO.read_text())
 
 
-class Relist022(unittest.TestCase):
-    """Max on 021: New kit (and every save) is listed in the library without a restart."""
+class Relist(unittest.TestCase):
+    """New kit (and every save) is listed in the library without a restart."""
 
     def body(self, signature):
         return re.search(re.escape(signature) + r'(.*?)\n\}', STUDIO.read_text(), re.S).group(1)
@@ -1578,8 +1579,8 @@ class Relist022(unittest.TestCase):
         self.assertIn('// A35 The library lists saves at once', STUDIO.read_text())
 
 
-class Presets023(unittest.TestCase):
-    """Max on 022: New kit still missing from presets > snapshot; pads 14 and up didn't play their slices."""
+class PresetIndex(unittest.TestCase):
+    """New kit shows in presets > snapshot (A37); every pad plays its own slice (A36)."""
 
     def body(self, signature):
         return re.search(re.escape(signature) + r'(.*?)\n\}', STUDIO.read_text(), re.S).group(1)
@@ -1604,7 +1605,7 @@ class Presets023(unittest.TestCase):
 
     def test_a_live_slice_plays_its_source_frames(self):
         # A36: cuts are output frames; with tape retime the output is longer than the source, so the live
-        # slice maps them back (022: 24 slices at x1.72, pad 14 began past the source end and was silent)
+        # slice maps them back (unmapped, with 24 slices at x1.72 pad 14 begins past the source end and is silent)
         body = self.body('void slice_source(const Edit& e, u32 k, u32& a, u32& b) {')
         self.assertIn('const u32 src_len = e.end - e.start, n = output_length();', body)
         self.assertIn('scale_frames(studio.cuts[k - 1], src_len, n)', body)
@@ -1612,7 +1613,7 @@ class Presets023(unittest.TestCase):
         play = self.body('void play_edit() {')
         self.assertEqual(play.count('slice_source(e, e.slice, a, b);   // A36'), 2)
         self.assertNotIn('e.start + s0', play)
-        # the 022 case: source 4222..86391, output 143795, 24 even cuts; every slice inside the source
+        # 24 slices at x1.72: source 4222..86391, output 143795, 24 even cuts; every slice inside the source
         src, n = 86391 - 4222, 143795
         cuts = [n * k // 24 for k in range(25)]
         for k in range(1, 25):
@@ -1622,8 +1623,8 @@ class Presets023(unittest.TestCase):
         self.assertLessEqual(abs((4222 + scale_frames(cuts[14 - 1], src, n)) - (4222 + src * 13 // 24)), 2)
 
 
-class Loader024(unittest.TestCase):
-    """Max on 023: a beat retime played while it rendered went silent once fully rendered (A38, P13)."""
+class GrowingPreview(unittest.TestCase):
+    """A beat retime played while it renders keeps sounding once fully rendered (A38, P13)."""
 
     def test_a_stop_keeps_growing(self):
         stop = re.search(r'void stop_play\(\) \{(.*?)\n\}', STUDIO.read_text(), re.S).group(1)
@@ -1639,8 +1640,8 @@ class Loader024(unittest.TestCase):
         self.assertIn('want_resume = false;\n', work[work.index('load_serial = want_serial;'):])
 
 
-class Search024(unittest.TestCase):
-    """sample-studio-024: the WSOLA search's probes made once a hop pick the same splice as before."""
+class RetimeSearch(unittest.TestCase):
+    """The WSOLA search's probes, made once a hop, pick the same splice as a per-candidate search."""
 
     @staticmethod
     def old_search(probe, nominal, natural, hop, length):
@@ -1659,7 +1660,7 @@ class Search024(unittest.TestCase):
 
     @staticmethod
     def grid_search(probe, nominal, natural, hop, length):
-        # sample_studio_dsp.hpp beat_frame, sample-studio-024, line for line
+        # studio_dsp.hpp beat_frame, line for line
         span = min(hop // 2, 256)
         best, best_score = nominal, -0x7FFFFFFF
         terms = (hop + 15) // 16
@@ -1708,8 +1709,8 @@ class Search024(unittest.TestCase):
             self.assertIn(line, dsp)
 
 
-class Saves024(unittest.TestCase):
-    """Max on 023: slow slice saves (A40), saves from the finished preview (A41), smaller kits (A42), and the
+class OnePassSaves(unittest.TestCase):
+    """Slice saves in one pass (A40), saves from the finished preview (A41), smaller kits (A42), and the
     studio staying on the source after this kit (A43)."""
 
     def body(self, signature):
@@ -1787,8 +1788,8 @@ class Saves024(unittest.TestCase):
         self.assertIn('log(__LINE__, "kit: the studio stays on %s", studio.path);', kit)
 
 
-class Print025(unittest.TestCase):
-    """Max on 024: "Why is reverb not printed?" A44: beat retime prints through its preview; A45: slices print."""
+class PrintSends(unittest.TestCase):
+    """A44: beat retime prints its sends (reverb included) through its preview; A45: slices print."""
 
     def body(self, signature):
         return re.search(re.escape(signature) + r'(.*?)\n\}', STUDIO.read_text(), re.S).group(1)
@@ -1845,8 +1846,8 @@ class Print025(unittest.TestCase):
         self.assertEqual(cuts[-1] - cuts[-2], 250000 + 44100 * 4)
 
 
-class Mirror025(unittest.TestCase):
-    """Max on 024: the trim page flips when reversed (A46); tail "full" until quiet, with a cap (A47, P15)."""
+class MirrorAndTail(unittest.TestCase):
+    """The trim page flips when reversed (A46); tail "full" until quiet, with a cap (A47, P15)."""
 
     def body(self, signature):
         return re.search(re.escape(signature) + r'(.*?)\n\}', STUDIO.read_text(), re.S).group(1)
@@ -1915,7 +1916,7 @@ class Mirror025(unittest.TestCase):
         self.assertEqual(out_total, loud_until - 1 + keep)
 
 
-class PrintCard026(unittest.TestCase):
+class PrintCard(unittest.TestCase):
     """The print card's second line fits its 23 characters at every length a print can have."""
 
     def test_the_card_line_fits(self):

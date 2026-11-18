@@ -1,7 +1,7 @@
-// Sample Studio's own player (private, sample-studio-014; OP-XY-Dev drafts/sample-editor.md
-// §0.12). Max: "It should be completely separated from [the track's sampler] so it doesn't
-// inherit its filter / speed / fades etc."; after 012: the key strictly untouched; then
-// "Audio chip load": the audio board loads the render itself.
+// Sample Studio's own player. It is completely separate from the track's sampler, so it
+// inherits none of its filter, speed or fades, and the key stays strictly untouched. The audio
+// board loads each render itself (below), rather than through the key and stock's
+// loader.
 //
 // It defines the master bus's two hooks (profile service master_bus: the master EQ call
 // 8d511b80 and the B3 receiver 8d5b145e), which a master processor extension defines
@@ -16,7 +16,7 @@
 // board's sample cache because it is on the key: the block borrows it there by its path's hash.
 // The block plays either at unity and the file's rate, after the dry signal and both send
 // returns, before the master compressor and volume. Nothing touches the track or the key.
-// Evidence: side-session notes sample-studio-player-re.md and sample-studio-audio-load-re.md.
+// Each firmware fact the player rests on is under "Assumptions" below.
 #include <opxy/sample_studio.hpp>
 #include <opxy/audio.hpp>
 #include <opxy/q31.hpp>
@@ -46,20 +46,20 @@ const u32 kHold = 145;   // P7: the studio's track plus one (0: none), on its ow
 const u32 kGrow = 146, kOnDisk = 147;   // P8: a render's serial | track << 24, then its frames on disk
 enum : u32 { kPlay = 1, kReverse = 4, kRelease = 8, kGrowing = 16 };   // begin's flags
 enum : u32 { kFromCache = 1, kFromFile = 2, kLive = 3, kLiveFile = 4 };   // source's mode (low byte; track above)
-// P15 (sample_studio.cpp A47): kBounceFrames' top bit asks for a "full" tail: the capture stops once the
+// P15 (editor.cpp A47): kBounceFrames' top bit asks for a "full" tail: the capture stops once the
 //    print stays quiet after the play ends (capture_block), at most at the size sent.
-// P14 (sample_studio.cpp A44): an armed capture also waits for, and starts with, a kLiveFile play (the beat
+// P14 (editor.cpp A44): an armed capture also waits for, and starts with, a kLiveFile play (the beat
 //    retime's preview through the live chain), which itself starts only once the preview is loaded whole.
-// P13 (sample_studio.cpp A38): a growing preview's loader that was marked done before its last segment (a
+// P13 (editor.cpp A38): a growing preview's loader that was marked done before its last segment (a
 //    command naming it without kGrowing reads as its landing) carries on when a larger count arrives.
-// P12 (sample_studio.cpp A32): kLiveFile runs P9's chain on the loaded preview (which = its serial)
+// P12 (editor.cpp A32): kLiveFile runs P9's chain on the loaded preview (which = its serial)
 //    instead of the pinned original: the retime render, already in playing order, at its length, with
 //    the gain, colour, DC, fades and channels live over it. It starts once the preview is loaded to the
 //    play's end, and stops, as a preview play does, when another preview replaces it in the buffer.
-// P9 Live edits (Max: "Yes, make them live"): kLive plays the original on the key (pinned by its
-//    hash, as kFromCache) through the render's own chain, dsp::Pipeline (sample_studio_dsp.hpp:
+// P9 Live edits (editor.cpp A24): kLive plays the original on the key (pinned by its
+//    hash, as kFromCache) through the render's own chain, dsp::Pipeline (studio_dsp.hpp:
 //    markers, reverse, gain, tape speed, drive, bits, rate, filter, wow, mix, DC), then the
-//    writer's fades and channels (sample_studio.cpp put_frame), frame by frame in the block. Its
+//    writer's fades and channels (editor.cpp put_frame), frame by frame in the block. Its
 //    settings come as kParam words (index << 24 | 24-bit value), published whole by kParamCommit;
 //    a play takes the newest set. While it plays, a newer set changes the colour stage and the
 //    gain, eased per block (gain 1/8 of the way, drive and mix a few steps, the filter one cutoff
@@ -70,17 +70,17 @@ enum : u32 { kFromCache = 1, kFromFile = 2, kLive = 3, kLiveFile = 4 };   // sou
 const u32 kParam = 148, kParamCommit = 149;
 enum : u32 { kPBegin, kPEnd, kPReverse, kPGainHigh, kPGainLow, kPDc, kPStretch, kPRate, kPBits, kPDrive, kPSweep,
              kPComp, kPSend1, kPSend2, kPSpare, kPFrames, kPFadeIn, kPFadeOut, kPChans, kParams };
-// P10 Live sends (sample-studio-017, Max: "we'd be using whichever effects are on the actual FX 1 and
-//    FX 2 slots"): the player's block is made at the first of the mixer's per-track hooks each block
+// P10 Live sends (editor.cpp A25), through whichever effects sit in the FX 1 and
+//    FX 2 slots: the player's block is made at the first of the mixer's per-track hooks each block
 //    (drum_send.cpp's 8d510bea, before any track's voices: the engine clears its five mix buffers,
 //    FX I's 0x84caa140 and FX II's 0x84caa340 among them, at 8d5107a8..8d51083c before its track
 //    loop) and added into the two send buses at the send amounts, through stock's curves for a
 //    track's send knob (FX I 0.8 k^2 + 0.2 k, FX II k), before stock runs the send effects
-//    (8d50f594 at 8d5116a0, 8d511908). The dry block goes into the master bus as before (P2). The
+//    (8d50f594 at 8d5116a0, 8d511908). The dry block goes into the master bus (P2). The
 //    amounts come as kPSend1/kPSend2, applied at once (any play), eased per block.
 
 const i32 kSendEase = 1 << 25;   // a full sweep of a send in ~64 blocks (~93 ms)
-// P11 The real-time bounce (sample_studio.cpp A29): kBounce arms a capture (its serial; 0 lets it go)
+// P11 The real-time bounce (editor.cpp A29): kBounce arms a capture (its serial; 0 lets it go)
 //    and kBounceFrames sizes it, in 44.1 kHz frames. The loader's job allocates the buffer from the
 //    sample pool (after the same headroom check), and the next live play waits for it. From that
 //    play's first block, the master hook stores the studio's dry block plus FX I's and FX II's buses,
@@ -98,13 +98,13 @@ const u32 kFrames = opxy::block_frames;
 //    (0x84048894, 0x08039f24). The original is pinned by raising its node's use count (+0x18)
 //    and released with stock's 8d509df8, only in the block at a command boundary (stock's own
 //    deferred note starts lock the same mutex in the block).
-// P4 Level, calibrated on 015's log: a sampler voice on the key reaches the track's sum at about
+// P4 Level, calibrated from the device log: a sampler voice on the key reaches the track's sum at about
 //    pcm << 7 (a 31,773 peak file: its silenced voices peaked 56..64 /32768 of full scale at the
 //    voice hook), then stock scales that sum by the track's gain (0x08cccccc at the default
 //    volume, about -23 dB; drum_send.hpp drum_send_track_gain: a Q31 multiply) and its dry level
-//    (0x7fffffff), and the engine adds it into this bus. 015 mixed pcm << 10 here: 491 /32768 for
-//    the same file, about 41 dB over the key, which Max heard as "still very loud". The player now
-//    mixes at the key's default level, fixed (Max: nothing inherited from the track): pcm << 7
+//    (0x7fffffff), and the engine adds it into this bus. Mixing pcm << 10 here gives 491 /32768 for
+//    the same file, about 41 dB over the key: far too loud. The player
+//    mixes at the key's default level, fixed (nothing inherited from the track): pcm << 7
 //    times 0x08cccccc, so moving the track's fader doesn't move it. The log still compares
 //    its peak with the key's (the silenced voices' peak times the track's gain words).
 const i32 kKeyGain = 0x08cccccc >> 9;    // Q31 on gain_word's pcm << 16: pcm << 7 x 0.069
@@ -129,16 +129,16 @@ const u32 kBufferBytes = kMaxFrames * 2 * 2 + 64;
 const u32 kHeadroom = 8u << 20;           // what stock keeps free for its own loads after ours
 const u32 kChunkBytes = 32768, kHeader = 44;
 // P8 Play while rendering: a full preview render writes its output as segment files of
-//    kSegmentFrames, each closed when full: t<track>-<serial>.a.wav, .b.wav, ... (sample_studio.cpp
-//    A23; 015's reopen-to-append didn't hold its place: "reopened at 0, not 262188"). After each,
+//    kSegmentFrames, each closed when full: t<track>-<serial>.a.wav, .b.wav, ... (editor.cpp
+//    A23; a file reopened to append doesn't hold its place: it reopens at 0). After each,
 //    the main board sends kGrow/kOnDisk: the frames on disk in all. The loader reads segment k
 //    whole into the buffer at frame k * kSegmentFrames, up to that count; a segmented preview is
 //    complete once a command names it without kGrowing (it landed, its last count sent). The quick
 //    first part stays one plain file. A play marked kGrowing stops cleanly where what's loaded ends.
 const u32 kSegmentFrames = 65536;
 const char kStudioFolder[] = "/fat32/samples/user/.studio/t";
-// P7 The studio's track is silent while the studio is open (Max on 014: the keys played the
-//    filtered original through the track; they now play the edit through this player, which
+// P7 The studio's track is silent while the studio is open (otherwise the keys play the
+//    filtered original through the track; they play the edit through this player instead, which
 //    the main board starts on each of the track's notes). The mixer's voice loop hands each
 //    voice's finished block (0x11b01548, 64 interleaved L/R Q31 frames) to drum_send.cpp's hook
 //    at 8d51c7b2 just before stock adds it into the track's sum; the hook calls
@@ -232,7 +232,7 @@ dsp::Pipeline chain;
 Live chain_now, chain_target;
 u32 chain_version, chain_out, chain_step_in, chain_step_out;
 u32 chain_worst, chain_sum, chain_blocks;
-i32 chain_l[kFrames], chain_r[kFrames];   // the chain's block (P9, 018)
+i32 chain_l[kFrames], chain_r[kFrames];   // the chain's block (P9)
 u32 chain_at, chain_count;
 i32 rs_window[2][2];                      // a source not at 44.1 kHz, read at its rate
 u32 rs_frac, rs_step;
@@ -293,7 +293,7 @@ void bounce_path(char* out, u32 size, u32 serial, const char* tail) {
     append_number(out, size, n, serial);
     append(out, size, n, tail);
 }
-// 018: a sample-pool block the audio block may still be reading (a play fading out, a capture's
+// A sample-pool block the audio block may still be reading (a play fading out, a capture's
 // last block) is freed only once the block count has moved on by kRetireBlocks; until then the
 // loader's job re-posts itself.
 const u32 kRetireBlocks = 8;
@@ -504,7 +504,7 @@ void load_work() {
         chunks = worst_us = read_us = opens = 0;
     }
     if (want_resume) {
-        // P13 (sample-studio-024): a segmented preview marked done too soon (a stop read as its landing) whose
+        // P13: a segmented preview marked done too soon (a stop read as its landing) whose
         // count has grown since: on from its next segment, which starts where it stopped (a segment boundary)
         want_resume = false;
         if (load_done && segmented && !file && loaded_frames < want_limit && loaded_frames < kMaxFrames &&
@@ -623,7 +623,7 @@ bool start(const Command& c) {
     player.from_file = c.mode == kFromFile || c.mode == kLiveFile;
     player.live = false;
     if (c.mode == kLiveFile) {
-        // P14 (sample_studio.cpp A44): a beat retime's print plays its preview live; the capture as P11
+        // P14 (editor.cpp A44): a beat retime's print plays its preview live; the capture as P11
         if (bounce_want && bounce_want != bounce_done && !(bounce_want == bounce_serial && bounce_ready)) return false;
         if (!start_live(c)) return false;   // P12
         if (bounce_ready && !bounce_capturing && !bounce_full) bounce_capturing = true;   // P14: from this block
@@ -728,7 +728,7 @@ bool start_live(const Command& c) {
     player.live = true;
     return true;
 }
-// P10: a send's gain from its amount (sample_studio.cpp send_gain, stock's knob curves).
+// P10: a send's gain from its amount (editor.cpp send_gain, stock's knob curves).
 i32 send_gain(u32 send, u32 amount) {
     const i32 k = static_cast<i32>((0x7fffffffu / 100u) * (amount > 100 ? 100u : amount));
     if (send) return k;
@@ -758,8 +758,8 @@ void ease_chain() {
     s.rate_index = t.rate_index;
 }
 // P9: the block, live: the chain, the writer's fades and channels, then the key's level (P4).
-// P9: the chain's next frame after the writer's fades and channels (sample_studio.cpp put_frame),
-// from a block the chain fills 64 frames at a time (sample-studio-018: its block form). False at the end.
+// P9: the chain's next frame after the writer's fades and channels (editor.cpp put_frame),
+// from a block the chain fills 64 frames at a time. False at the end.
 bool pull(i32* w) {
     const Live& l = chain_now;
     if (chain_at == chain_count) {
@@ -785,7 +785,7 @@ bool pull(i32* w) {
     return true;
 }
 // P9: the block, live: the chain, then the key's level (P4). A source not at 44.1 kHz is read at its
-// rate (sample-studio-018: 016 played a 48 kHz file 1.5 semitones flat), linearly between frames.
+// rate (else a 48 kHz file plays 1.5 semitones flat), linearly between frames.
 void live_block(i32* left, i32* right) {
     const u32 c0 = cycles();
     ease_chain();
@@ -922,7 +922,7 @@ void receive(u32 channel, i32 value) {
             bounce_want = 0;
             bounce_cancel = true;
         } else {
-            bounce_want = static_cast<u32>(value);   // kBounceFrames came first (sample_studio.cpp)
+            bounce_want = static_cast<u32>(value);   // kBounceFrames came first (editor.cpp)
         }
         post_load();
         return;
@@ -1178,7 +1178,7 @@ i16 to16(i32 word) {
     const i32 v = (word * 7447 + 32768) >> 16;
     return static_cast<i16>(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
 }
-// P15 (sample_studio.cpp A47): a "full" tail records on after the play ends until the print stays under
+// P15 (editor.cpp A47): a "full" tail records on after the play ends until the print stays under
 // kQuietLevel (-60 dBFS) for kQuietHold (2 s), keeping kQuietKeep (0.1 s) past its last louder frame; the
 // size the main board sent (the edit plus 30 s) is the cap for feedback that never dies away.
 const i32 kQuietLevel = 32;

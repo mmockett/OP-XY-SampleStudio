@@ -1,8 +1,8 @@
-// Sample Studio bakes, private (OP-XY-Dev drafts/sample-editor.md §6, stages 1 and 2):
+// Sample Studio bakes:
 // the parts that need no stock call. Its arithmetic is the reference's
-// (OP-XY-Dev tools/sample_studio/studio_ref.py): Q4.28 gains with floor
+// (tests/studio_ref.py): Q4.28 gains with floor
 // semantics, bounce phase 1's TPDF dither, and a copy, not a dither, when the
-// gain is unity. The device sides are sample_probe.cpp and sample_studio.cpp.
+// gain is unity. On the device, editor.cpp and player.cpp use it.
 #pragma once
 #include <opxy/q31.hpp>
 #include <opxy/types.hpp>

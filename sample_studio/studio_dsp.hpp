@@ -1,15 +1,14 @@
-// Sample Studio's offline processing (OP-XY-Dev drafts/sample-editor.md §2, §3 B):
-// the render chain the preview and the save share, private.
+// Sample Studio's offline processing: the render chain the preview and the save share.
 //
 // A pull pipeline, one output frame at a time, Q31 words per channel:
 //   source (markers, reverse, gain on the 16-bit samples)
 //   -> time (beat: WSOLA, pitch kept; then a resampler for tape speed or beat pitch)
-//   -> color (drive, bits, rate, the filter sweep, comp; sample-studio-017)
+//   -> color (drive, bits, rate, the filter sweep, comp)
 //   -> DC
-// The writer (sample_studio.cpp) adds the fades and channels, which need the
+// The writer (editor.cpp) adds the fades and channels, which need the
 // output's length. Every stage is integer arithmetic in 32 bits (products split
-// or through the Blackfin's (T) multiply), so its reference, OP-XY-Dev
-// tools/sample_studio/studio_ref.py, makes the same samples. State lives in the
+// or through the Blackfin's (T) multiply), so its reference,
+// tests/studio_ref.py, makes the same samples. State lives in the
 // pipeline object, so a render can stop after any frame and go on in the next
 // file-worker job.
 #pragma once
@@ -17,7 +16,7 @@
 
 namespace opxy { namespace studio_dsp {
 // Internal linkage: the studio and its player both compile this chain, and the SDK build makes
-// an out-of-line inline member strong (sample-studio-017: Pipeline::color stopped inlining).
+// an out-of-line inline member strong (Pipeline::color, when the compiler doesn't inline it).
 namespace {
 using namespace opxy::sample_bake;
 
@@ -51,19 +50,19 @@ const u32 kCutoffQ31[48] = {
 const u32 kRateHz[9] = {0u, 32000u, 24000u, 16000u, 12000u, 8000u, 6000u, 4000u, 2000u};
 // The bits control: off (16), then these depths.
 const u32 kBits[9] = {16u, 12u, 10u, 8u, 6u, 5u, 4u, 3u, 2u};
-// The filter sweep (sample-studio-017, Max: one control, low-pass <- off -> high-pass): a fixed,
+// The filter sweep (one control, low-pass <- off -> high-pass): a fixed,
 // mild resonance (damping 2 x 0.35), the state-variable filter run on the input over 4 (12 dB of
-// headroom) with its states held inside +-2^30, so no transient can pin them at the rails (016:
-// at 12 kHz and resonance 100 both states latched at -1.0 and the sound stopped).
+// headroom) with its states held inside +-2^30, so no transient can pin them at the rails (unheld,
+// at 12 kHz and resonance 100 both states latch at -1.0 and the sound stops).
 const i32 kSweepHalf = 0x2ccccccd;            // 0.35 in Q31
 const i32 kSweepLimit = 1 << 30;
 inline i32 sweep_clamp(i32 v) { return v < -kSweepLimit ? -kSweepLimit : v > kSweepLimit ? kSweepLimit : v; }
-// Bits (017): rounded, not truncated (016's mask added half a step of DC), on a step that follows
+// Bits: rounded, not truncated (a mask adds half a step of DC), on a step that follows
 // the sound's peak (a peak envelope, release 2^-12 a frame), like a floating-point converter, so a
 // quiet tail keeps its crunch instead of falling under a 4-bit step into silence. Below 2^16 of
 // envelope the step stops shrinking.
 const u32 kBitsRelease = 12, kBitsFloor = 1u << 16;
-// Comp (017): one knob a, 0..100. Threshold 0 to -30 dB (0.3 a dB down), ratio 1 + 5 a / 100,
+// Comp: one knob a, 0..100. Threshold 0 to -30 dB (0.3 a dB down), ratio 1 + 5 a / 100,
 // makeup to bring a full-scale peak back to full scale; a peak envelope (attack 2^-3, release
 // 2^-13 a frame), the gain recomputed every 16 frames: (T + (env - T) / R) / env to 20 bits.
 const u32 kCompThreshold[101] = {
@@ -150,7 +149,7 @@ inline i32 lerp(i32 a, i32 b, i32 frac) {
     return sat_add(a, mul31(d, frac) * 2);
 }
 
-// Drive (sample-studio-006): gain 1 + 5 drive/100 (up to 6x), a tanh-shaped
+// Drive: gain 1 + 5 drive/100 (up to 6x), a tanh-shaped
 // curve t(v) = v (27 + v^2) / (27 + 9 v^2) that reaches +-1 with zero slope at
 // |v| = 3 and holds there, then makeup 1 - 0.3 drive/100 (-3.1 dB at 100): loud
 // and dirty at 100, never wrapping, never silent. 32-bit only (studio_chain.py
@@ -162,11 +161,11 @@ inline i32 lerp(i32 a, i32 b, i32 frac) {
 //   t  = |n| / dn to 20 bits by long division, << 11, signed (Q31)
 //   out = floor(t M / 2^31), M = 2^31 - 1 - 6442450 d
 const u32 kDriveGainStep = 13421772u, kDriveMakeupStep = 6442450u, kDriveBits = 20u;
-// sample-studio-018: the division by a reciprocal, not 20 steps of long division (016's live chain
-// spent most of its worst blocks there): 1/dn over dn's whole range [27 2^22, 108 2^22) as
+// The division by a reciprocal, not 20 steps of long division (where the live chain would spend
+// most of its worst blocks): 1/dn over dn's whole range [27 2^22, 108 2^22) as
 // floor(2^57 / dn) at 2^20 steps, read with linear interpolation, one Newton step, then the 20-bit
 // quotient made exact from its remainder r 2^20 - q dn (which fits 32 bits signed): the same
-// quotient as the long division, bit for bit (tests/test_sample_studio.py Speed018).
+// quotient as the long division, bit for bit (tests/test_sample_studio.py BlockForm).
 const u32 kDriveRecip[326] = {
     1272582902u, 1260907830u, 1249445031u, 1238188770u, 1227133513u, 1216273924u,
     1205604855u, 1195121334u, 1184818564u, 1174691910u, 1164736893u, 1154949188u,
@@ -264,7 +263,7 @@ struct Settings {
     i32 pitch;                // semitones, -24..24
     u32 beat;                 // 0 tape (speed and pitch together), 1 beat (pitch kept)
     u32 grain_ms;             // beat's grain, 20..120
-    // the process page (sample-studio-017)
+    // the process page
     u32 rate_index, bits_index, drive;
     i32 sweep;                // -48..-1 low-pass at cutoff -sweep, 0 off, 1..48 high-pass
     u32 comp;                 // 0..100
@@ -274,7 +273,7 @@ inline bool color_active(const Settings& s) {
     return s.rate_index || s.bits_index || s.drive || s.sweep || s.comp;
 }
 
-// Beat's grain (sample-studio-009): the page's grain, grown with the compression the
+// Beat's grain: the page's grain, grown with the compression the
 // grains must make (stretch x pitch ratio below 1: input per output above 1), so a x0.25
 // edit plays longer, continuous pieces instead of 20 ms slices, up to kMaxGrainMs.
 const u32 kMaxGrainMs = 160;
@@ -307,7 +306,7 @@ struct Pipeline {
     u32 current;              // start of the grain being faded in
     u32 index;                // frame within the hop
     bool beat_on, first, beat_done;
-    // the search's probes, made once a hop (sample-studio-024): hop <= 3840 (160 ms at 48 kHz) gives 240 terms,
+    // the search's probes, made once a hop: hop <= 3840 (160 ms at 48 kHz) gives 240 terms,
     // span <= 256 gives 65 candidates, so 65 + 2 * 239 = 543 grid slots
     static constexpr u32 kProbeTerms = 240, kProbeSlots = 544;
     i32 natural_probes[kProbeTerms];
@@ -350,7 +349,7 @@ struct Pipeline {
             const u32 denom = (s.stretch * ratio) >> 8;
             const u32 per_out_q16 = denom ? (6553600u << 8) / denom : 65536u;
             // hop * per_out_q16 in two parts: hop <= 3840 (160 ms at 48 kHz) and per_out_q16 up to 2^20
-            // would pass 2^32 whole (sample-studio-009)
+            // would pass 2^32 whole
             const u32 low = hop * (per_out_q16 & 0xffffu);
             advance_int = hop * (per_out_q16 >> 16) + (low >> 16);
             advance_frac = low & 0xffffu;
@@ -379,8 +378,8 @@ struct Pipeline {
         if (s.dc) block.start(rate);
     }
 
-    // The match signal: both channels of a stereo source (sample-studio-008; the left alone
-    // left the right channel's splices unaligned), 12 bits, so a hop's sum stays in 32 bits.
+    // The match signal: both channels of a stereo source (the left alone
+    // leaves the right channel's splices unaligned), 12 bits, so a hop's sum stays in 32 bits.
     i32 probe(u32 i) const {
         return channels > 1 ? (at(i, 0) >> 21) + (at(i, 1) >> 21) : at(i, 0) >> 20;
     }
@@ -404,10 +403,10 @@ struct Pipeline {
                 const u32 span = hop / 2 < 256 ? hop / 2 : 256;
                 u32 best = nominal;
                 i32 best_score = -0x7fffffff;
-                // sample-studio-024: every probe a candidate reads lies on one 8-frame grid from nominal - span,
+                // Every probe a candidate reads lies on one 8-frame grid from nominal - span,
                 // so each grid point's probe is made once a hop, and the natural continuation's once, instead of
                 // both for every candidate (~7,000 probes a hop at 40 ms to ~230). The same products are summed
-                // in the same order: the choice is bit for bit the one before.
+                // in the same order: the choice is bit for bit the one a per-candidate search makes.
                 const u32 terms = (hop + 15) / 16;              // j = 0, 16, ... < hop
                 const u32 candidates = 2 * span / 8 + 1;        // d = -span, -span + 8, ... <= span
                 const u32 slots = candidates + 2 * (terms - 1); // candidate k's term m reads slot k + 2m
@@ -488,7 +487,7 @@ struct Pipeline {
         pos_frac &= 0xffffu;
         return true;
     }
-    // Color: drive, bits, rate, the filter sweep, comp (sample-studio-017).
+    // Color: drive, bits, rate, the filter sweep, comp.
     void color(i32* w) {
         const u32 ch = channels < 2 ? 1u : 2u;
         if (s.drive)
@@ -565,7 +564,7 @@ struct Pipeline {
         }
         if (ch < 2) w[1] = w[0];
     }
-    // sample-studio-018: the colour stage over a block, each step across the block in turn: per frame
+    // The colour stage over a block, each step across the block in turn: per frame
     // the same arithmetic in the same order as color() (the steps that couple the channels take both
     // per frame), so the same words, at a fraction of the cost per frame in the audio block.
     void color_block(i32* l, i32* r, u32 n) {
@@ -664,7 +663,7 @@ struct Pipeline {
         if (ch < 2)
             for (u32 k = 0; k < n; ++k) r[k] = l[k];
     }
-    // Up to n output frames into l and r, the block form of next() (sample-studio-018): the same
+    // Up to n output frames into l and r, the block form of next(): the same
     // words, frame for frame. Returns how many it made (fewer at the end).
     u32 fill(i32* l, i32* r, u32 n) {
         u32 k = 0;

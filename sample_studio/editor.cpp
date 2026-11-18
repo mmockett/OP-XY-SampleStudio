@@ -58,7 +58,7 @@ using host::library_on_top;
 
 namespace {
 // ---------------------------------------------------------------- Assumptions
-// A1 Keys: the library controller's methods (firmware notes §2) see every key
+// A1 Keys: the library controller's methods see every key
 //    and encoder while the library is on top: press (ctl, event) with event[0]
 //    the key, Shift press likewise, release (ctl, key), turn (ctl, position,
 //    event) with event[1] the detents. A method that returns 1 keeps the key
@@ -70,7 +70,7 @@ const u32 kKeyM1 = host::key_m1, kKeyM2 = host::key_m2, kKeyM3 = host::key_m3, k
 //    +0x14), whose top is the library while it shows.
 // A3 Drawing: the browser screen's frame (8d55341c) paints the studio in place
 //    of stock's library while the studio is open; while it isn't, stock's
-//    library and then the label over it (device run: fine, bar-studio-002).
+//    library and then the label over it.
 // A4 Live preview: start, end, loop markers kept inside them, reverse and level
 //    written to the key's pad record, the GUI's region change counter bumped,
 //    and the region table sent (8d58938c), as stock's slicer does after it
@@ -80,7 +80,7 @@ const u32 kFlushMs = 40;
 //    kJobFrames output frames a file-worker job, each job queued from the last
 //    one's completion; a save goes through a .tmp renamed when complete, removed
 //    on failure.
-const u32 kChunkFrames = 8192;        // 32 KB writes of stereo (sample-studio-013: 8 KB writes ran ~0.5 MB/s)
+const u32 kChunkFrames = 8192;        // 32 KB writes of stereo (8 KB writes ran ~0.5 MB/s)
 const u32 kJobFrames = 32768;
 // A6 Putting a file on a key: stock's library completion order (8c0a2354): path
 //    (8d5893bc), region initializer (8d589b8c sampler/multisampler, 8d589ac0
@@ -100,13 +100,13 @@ const u32 kGapMs = 400;
 // A11 The rendered preview: a new file each render, /fat32/samples/user/.studio/
 //    t<track>-<serial>.wav, the serial counting up from boot and never reused.
 //    Stock's cache knows a sample by its path's hash alone, so a name used twice
-//    can play an older render (sample-studio-003 cycled 16 names and did).
+//    can play an older render (a cycle of 16 names did).
 //    The folder is made with bounce phase 1's mkdir (0x8c0bd5bc). Stock's library is
 //    assumed to skip a folder whose name starts with a dot (U). Files no longer on
 //    the key are removed once the next one is in the cache (A13), the rest when the
 //    studio closes; the key gets the original back then, so a project never keeps one.
 const char kScratchFolder[] = "/fat32/samples/user/.studio";
-const u32 kDebounceMs = 200;          // sample-studio-013: 300 -> 200 ms
+const u32 kDebounceMs = 200;          // an edit rests this long before it renders
 const u32 kSweepMax = 64;            // files one removal job tries at most
 // A13 Stock loads a file put on a key in the background, and the key is silent
 //    until its cache holds it. After a preview goes on the key the studio asks the
@@ -119,7 +119,7 @@ const u32 kRetryMs = 1000, kRetries = 3;
 // A14 Borrowing the PCM: stock's acquire (8d509d70) refuses a sample its cache
 //    worker has marked unwanted (node +0x1c, stored at 8d50bd58 when the key is
 //    missing from the desired list), and while the library is open the key's own
-//    sample is unwanted: sample-studio-003's renders failed 78 times in 78. So the
+//    sample is unwanted: a borrow through it fails every time (78 in 78). So the
 //    studio borrows as stock does, without that one test: manager+4 locked
 //    (8d5be032 / 8d5be060), the node found (8d509824 on the map at 0x08039f24, its
 //    end at +4), loaded (+0x1d), its object ready ([obj] and [obj+0x30] nonzero) and
@@ -130,76 +130,76 @@ const u32 kRetryMs = 1000, kRetries = 3;
 //    builds the track list, starts the gather job (8d4d8344, gather 8d4dadec) and
 //    clears the byte. Stock sets it wherever a key's file changes: its region update
 //    right after the table send (8d58956c, then 8d589572) and the library's own
-//    handlers (8c0a25d6, 8c0a306a), which is why sample-studio-005's renders loaded
-//    only at the next encoder turn and compare changed nothing. The studio sets it
+//    handlers (8c0a25d6, 8c0a306a); without it a render loads
+//    only at the next encoder turn and compare changes nothing. The studio sets it
 //    after every table send that can change a key's file.
-// A16 While the studio is open no region of the track changes (Max, 012: "editing the raw
-//    sample in isolation"; after 012's run: the key strictly untouched). Previews are files the
+// A16 While the studio is open no region of the track changes: the raw sample is edited
+//    in isolation and the key stays strictly untouched. Previews are files the
 //    studio streams to its own player (A19); stock loads nothing for them. Save is the only
 //    change to the key: it puts the saved file there, with undo.
 // A17 Long edits: a render is cancelled at its next job once a newer edit arrives
-//    (005: 27 of 45 renders finished only to be thrown away). When the output would
+//    (otherwise most renders, 27 of 45 measured, finish only to be thrown away). When the output would
 //    run past kQuickMinMs, its first kQuickMs go on the key first (no count pass, a
 //    short fade at the cut), then the whole edit renders and replaces it.
 const u32 kQuickMs = 1500, kQuickMinMs = 3000, kQuickCutMs = 5;
-// A19 Playback is the studio's own player on the audio board (sample_studio_player.cpp): Shift
+// A19 Playback is the studio's own player on the audio board (player.cpp): Shift
 //    + M3 plays the edit from its start (the rendered preview once it exists, its quick first
 //    part meanwhile, or the original between the markers when nothing needs a render) and
 //    stops; Shift + M2 held plays the original as it was when the studio opened. Commands go as
 //    stock B3 parameters 138..144 (8d4dc84c), resent every kPlayResendMs while playing. The
-//    audio board loads each preview itself when it lands (sample-studio-014: it owns the card),
+//    audio board loads each preview itself when it lands (it owns the card),
 //    named by its track and serial; the original it already holds, on the key, named by its
 //    path's hash. Closing the studio releases the audio board's buffer. The playhead runs from
 //    the press at the file's rate.
 const u32 kPlayResendMs = 500;
-// A22 The keys play the edit (Max on 014: "The notes don't trigger the sample. When playing, I
-//    hear the filtered sample"). While the studio is open, each new note on its track (stock's
+// A22 The keys play the edit: a note on the track triggers the sample and hears it filtered.
+//    While the studio is open, each new note on its track (stock's
 //    per-track note serial 8d4d6c08, which keys and the sequencer both advance; read every frame)
 //    plays the edit from its start through the player, as Shift + M3 does: at unity whatever the
-//    key (an audition of the file), a new note restarting it. Releasing stops it like a gate (Max
-//    on 015: "lifting your finger off the pad doesn't stop the sample"): once no note of the track
+//    key (an audition of the file), a new note restarting it. Releasing stops it like a gate,
+//    so lifting a finger off the pad stops the sample: once no note of the track
 //    is held in stock's note map (0x86bda258, track * 128 + note, which paints the keyboard;
 //    note_activity.cpp), the player fades out (~6 ms). Shift + M3 still plays to the end. The track itself is silent meanwhile: the main board holds it with
 //    B3 145 (track + 1, resent every kHoldResendMs; 0 on leave) and the audio board zeroes its
-//    voices in the mixer (sample_studio_player.cpp P7), so the track's own notes still start and
+//    voices in the mixer (player.cpp P7), so the track's own notes still start and
 //    end as stock runs them. On a drum or multisampler track every note plays the edit and the
 //    whole track is silent while the studio is open.
 const u32 kHoldResendMs = 250;
 const u32 kTapMs = 100;   // a note never seen held within kTapMs: a tap, released
-// A23 Play while rendering (Max: "it should be able to play what has been rendered up to that
-//    point when auditioned, even if it's at 1 or 2 second increments"). A full preview render (not
+// A23 Play while rendering: an audition plays what has been rendered up to that point,
+//    even if it grows in steps of a second or two. A full preview render (not
 //    the quick first part) writes segment files of kSegmentFrames, each closed when full and never
-//    opened again: t<track>-<serial>.a.wav, .b.wav, ... (015 reopened one file to append; its
-//    seek didn't take: "reopened at 0, not 262188"). After each, the frame tells the audio board
+//    opened again: t<track>-<serial>.a.wav, .b.wav, ... (a file reopened to append fails:
+//    its seek doesn't take, it reopens at 0). After each, the frame tells the audio board
 //    with B3 146 (serial | track << 24) and 147 (the frames on disk in all); its loader reads each
-//    segment whole into its buffer at its place (sample_studio_player.cpp P8). Naming a segmented
+//    segment whole into its buffer at its place (player.cpp P8). Naming a segmented
 //    preview in any command sends its count first. A key or Shift + M3 during such a render plays
 //    the growing preview: what's loaded, stopping cleanly where it ends; a press later plays
 //    further. When it lands, its last count goes out and the play goes on to the real end.
 const u32 kSegmentFrames = 65536;   // ~1.5 s at 44.1 kHz: eight 32 KB writes of stereo
-// A24 Live edits (Max: "Yes, make them live"): an edit the live chain can play (live_ok: all but
+// A24 Live edits: an edit the live chain can play (live_ok: all but
 //    beat-mode retime and print through FX) is never rendered for audition. A play sends its
 //    settings (B3 148: index << 24 | value, 149: commit; only those that changed since the last)
-//    and plays the original through the player's copy of the render chain (sample_studio_player.cpp
+//    and plays the original through the player's copy of the render chain (player.cpp
 //    P9): the gain (level, or normalise over the markers as the render measures it), markers,
 //    reverse, tape speed, the colour stage, DC, fades over the output's length and the channels.
 //    Turning a knob while it plays sends the new set at once. The output's length for tape speed
-//    is tape_frames(), the count the resampler makes. Beat-mode retime and print still render as
-//    before (red bar, green flash, segments); every save renders.
-// A25 The process page (sample-studio-017, Max's layout): rate, bits, drive, the filter sweep /
-//    fx i, fx ii, tail, comp; no Shift rows on any page (trim lost silence, dc and chans: saves keep
+//    is tape_frames(), the count the resampler makes. Beat-mode retime and print still render
+//    (red bar, green flash, segments); every save renders.
+// A25 The process page: rate, bits, drive, the filter sweep /
+//    fx i, fx ii, tail, comp; no Shift rows on any page (trim has no silence, dc or chans: saves keep
 //    the sample's own channels). fx i and fx ii are send amounts, heard live through whatever sits
-//    in the FX I and FX II slots (B3 148 indices 12 and 13; sample_studio_player.cpp P10). Save
+//    in the FX I and FX II slots (B3 148 indices 12 and 13; player.cpp P10). Save
 //    prints them, with `tail` seconds after the edit, by the real-time bounce (A29).
-// A27 Save slices (Max: "Yes, add it"): on a drum sampler track a card offers "files" (the slice
+// A27 Save slices: on a drum sampler track a card offers "files" (the slice
 //    files beside the original, as always) or "this kit" (the files, then on the kit's keys from the
 //    selected one up, with undo; past the 24th key the rest are files only and the card says so).
-//    The card shows on every track since 019 (A30); "this kit" only on a drum sampler.
-// A30 New kit (sample-studio-019): the card's M2 saves the slices as a new drum kit preset, a
+//    The card shows on every track (A30); "this kit" only on a drum sampler.
+// A30 New kit: the card's M2 saves the slices as a new drum kit preset, a
 //    folder kPresetFolder/<stem>[-n].preset holding the slice files and a patch.json that puts
 //    them on the kit's keys 53 up (lokey = hikey), one region a slice (kMaxSlices = 24, the kit's
-//    size). Stock saves a user kit as /presets/snapshot/<date> (n).preset/patch.json (Max's empty
-//    kit, pulled 2026-11-15: compact JSON, the folder holding only the patch): the patch is that
+//    size). Stock saves a user kit as /presets/snapshot/<date> (n).preset/patch.json (an empty
+//    user kit as stock writes it: compact JSON, the folder holding only the patch): the patch is that
 //    file's text with the regions filled in, its defaults as they are (volume 18348, the default
 //    track volume). Each region copies stock's kit /content/presets/drum/zebra.json, the one stock
 //    kit with regions to hand: its keys in its order, the sample named by its file in the
@@ -207,74 +207,74 @@ const u32 kSegmentFrames = 65536;   // ~1.5 s at 44.1 kHz: eight 32 KB writes of
 //    framecount 0 as zebra has it. Written last, on the worker, after every slice; a failure
 //    removes the slices and the patch. Named after the sample, not the date. Stock's preset list
 //    is assumed to rescan the folder when it opens. The studio stays on the original.
-// A31 The highlighted file on a drum sampler or multisampler (Max on 020: "Pressing shift then Edit doesn't
-//    open the highlighted sample"): there the library highlights without putting the file on the key, so
+// A31 The highlighted file on a drum sampler or multisampler (Shift then Edit opens the
+//    highlighted sample): there the library highlights without putting the file on the key, so
 //    Shift + M1 opens the highlighted file when it isn't the key's own, for the selected key (studio.on_key):
 //    the keys play it, save puts the result on the key (undo back to the key's own), slices can go on the kit.
-// A32 Retime kept (Max on 020): with beat retime, the preview render holds only the retime (time_only);
+// A32 Retime kept: with beat retime, the preview render holds only the retime (time_only);
 //    level, normalise, colour, DC, fades and channels play live over it (the audio board's chain on the
-//    loaded preview, mode 4, sample_studio_player.cpp P12), so turning them never renders again.
+//    loaded preview, mode 4, player.cpp P12), so turning them never renders again.
 //    Saves still render the whole chain.
-// A33 A pad plays its slice on the slice page (Max on 020): key 53 slice 1 and up (note_struck).
-// A34 Neutral tuning (Max on 020: kit slices played +24): a file on an empty drum key gets root 60, and
+// A33 A pad plays its slice on the slice page: key 53 slice 1 and up (note_struck).
+// A34 Neutral tuning (else kit slices play two octaves up): a file on an empty drum key gets root 60, and
 //    slices on the kit root 60, fine 0 (stock_sample.hpp: kNeutralRootCents 6000).
-// A35 The library lists saves at once (Max on 021: New kit showed in presets > snapshot only after a restart).
+// A35 The library lists saves at once, not only after a restart (New kit in presets > snapshot too).
 //    Stock's library caches its listing and lists again only after a change clears its flag, as stock's own
 //    preset save does. A save sets library_stale; closing the studio clears the flag and queues the library's
 //    listing step, as entering the library does (relist_library). A save that ends after the close does it then.
-// A36 A slice plays its own part of the source (Max on 022: with 24 slices and tape retime, pads 14 and up were
+// A36 A slice plays its own part of the source (with 24 slices and tape retime, pads 14 and up would be
 //    silent): the cuts are output frames; the live chain plays source frames, so slice_source maps them back
-//    as the waveform does (a slice past the source end played nothing, the earlier ones the wrong part).
-// A44 A beat retime prints its sends (Max: "Why is reverb not printed?"): the real-time print (A29) plays the
+//    as the waveform does (else a slice past the source end plays nothing, the earlier ones the wrong part).
+// A44 A beat retime prints its sends (reverb included): the real-time print (A29) plays the
 //    whole preview live (A32's kLiveFile) when it's on the card and loaded, under 20 s; the audio board's
-//    capture waits for that play as for a live one (sample_studio_player.cpp P14). Longer: dry, the log says why.
+//    capture waits for that play as for a live one (player.cpp P14). Longer: dry, the log says why.
 // A45 Slices print too: the whole edit is printed live with its tail (A29, A44), then cut as A40 cuts its one
 //    pass (start_print_split): the page's cuts on the edit's length, the tail on the last slice, so each slice
 //    carries the ring-over of the one before, as a resample from a mixer would.
-// A46 Reversed, the trim page mirrors (Max: "flip the waveform rather than playing the playhead in reverse"):
+// A46 Reversed, the trim page mirrors (the waveform flips; the playhead doesn't run in reverse):
 //    the source is drawn end first, the markers in playing order (the left one the edit's end), and the
 //    playhead runs left to right (x_shown). The other pages already show the output in playing order.
-// A47 Tail "full" (Max: "renders it until silence ... a cap in case of endless feedback"): past 10 s the tail
+// A47 Tail "full" renders until silence, capped in case of endless feedback: past 10 s the tail
 //    reads "full": the print runs on after the edit until it stays under -60 dBFS for 2 s (keeping 0.1 s past
 //    its last louder frame), at most 30 s; the file's header gives its length back. At the cap the card says
 //    "tail cut at 30 s / still ringing". Offline (Lint) prints read it as 10 s.
-// A39 The beat retime's search makes each probe once a hop (sample_studio_dsp.hpp, sample-studio-024): the same
+// A39 The beat retime's search makes each probe once a hop (studio_dsp.hpp): the same
 //    splices, bit for bit, at a fraction of the work. Previews and saves of a beat retime both run faster.
-// A40 Slices of a retime in one pass (Max on 023: 24 slices took "a loooong time"): the length isn't known
-//    before the chain ends, so slices counted it first, running the retime twice. Now the chain writes one
+// A40 Slices of a retime in one pass (24 slices took very long otherwise): the length isn't known
+//    before the chain ends, and counting it first would run the retime twice. So the chain writes one
 //    temporary file at its own channels (render.in_path), then the slices are cut from it as it reads back:
 //    the page's cuts on its real length, each slice's fades and channels (begin_split).
-// A41 A save of a beat retime from its finished preview (Max: "reusing the preview for saves"): when the whole
+// A41 A save of a beat retime reuses its finished preview: when the whole
 //    preview of this edit is on the card (rendered, segmented, under the 20 s limit) and no normalise asks for
 //    the source's peak, the save reads the preview's segments in place of the original, with the retime off
 //    (start_pipe): only the gain, colour, DC, fades and channels run. Longer edits retime (A40 for slices).
-// A42 This kit onto a kit with fewer pads (Max on 023: "kit keys not found"): a pad is the first key whose
+// A42 This kit onto a kit with fewer pads than slices: a pad is the first key whose
 //    entry is that place; slices go on the pads from the selected one up, the rest stay files.
 // A43 After this kit the studio stays on the source and its edit, as after New kit (A30).
-// A38 A preview played while it rendered loads to its end (Max on 023: "once fully rendered - no audio"): a key's
-//    release sent its stop without kGrowing, which the audio board reads as the preview landing, so its loader
-//    stopped at what was on disk (65536 of 882000 frames) and the retime plays (A32, which wait for it whole)
-//    never started. The stop keeps kGrowing; the loader also carries on when a later count is larger (P13).
-// A37 New kit in stock's preset index (Max on 022): closing after a new kit builds the index again, as stock's
+// A38 A preview played while it rendered loads to its end: a key's
+//    release sends its stop with kGrowing. Without it the audio board reads the stop as the preview landing, its
+//    loader stops at what is on disk (65536 of 882000 frames) and the retime plays (A32, which wait for it whole)
+//    never start, with no audio once fully rendered. The loader also carries on when a later count is larger (P13).
+// A37 New kit in stock's preset index : closing after a new kit builds the index again, as stock's
 //    preset rename and delete do (rescan_presets, 8d4eefec(0)).
 const char kPresetFolders[] = "/fat32/presets", kPresetFolder[] = "/fat32/presets/snapshot";
-// A29 Printing stock effects (Max: "for FX, we'd be using whichever effects are on the actual FX 1 and
-//    FX 2 slots"): a save with a send above 0 is bounced in real time, whatever effect is there: the studio plays the edit live through the real sends while the audio board captures its
-//    dry block plus both send returns at the master bus point (sample_studio_player.cpp P11), the
+// A29 Printing stock effects, whichever effects sit in the FX 1 and
+//    FX 2 slots: a save with a send above 0 is bounced in real time, whatever effect is there: the studio plays the edit live through the real sends while the audio board captures its
+//    dry block plus both send returns at the master bus point (player.cpp P11), the
 //    edit's length plus the tail, then writes the file itself (it owns the card) as .studio/b<N>.wav.
 //    The main board pokes it along (B3 152), waits for the file, renames it to the save's name and
 //    finishes the save as any other. Other tracks' sends feed the same effects, so the card asks for
 //    the sequencer stopped. Only a live edit bounces (beat retime prints dry, the card says why).
-// A26 Compare and play latch (Max on 017: "Each latches, and turns to Stop"): Shift + M2 plays the
+// A26 Compare and play latch, each turning to Stop: Shift + M2 plays the
 //    original, Shift + M3 the edit; a second press stops, the other switches over, one plays at a
 //    time, both through the player with the playhead. A key's note still plays only while held.
-// A21 Retired: Lint printed offline on the main board (012-019). Every effect, Lint included,
-//    now prints by A29's real-time bounce, so the SDK carries no effect's code.
+// A21 Retired: Lint printed offline on the main board. Every effect, Lint included,
+//    prints by A29's real-time bounce, so the SDK carries no effect's code.
 // A20 Output pages (slice, retime, process) draw one waveform: the render once it
 //    exists, else the source mapped onto the output's estimated length. Its span stays
 //    where it was last fitted, so a new length shows at once in proportion; when the
 //    render lands the span eases to it (the waveform fits the width) under a green
-//    flash (Max, 012: no second, overlapping waveform).
+//    flash (no second, overlapping waveform).
 // A18 A time edit with no fade out (and not slices) renders in one pass, with no count
 //    pass first: the header goes out with the estimated length, and once the chain
 //    ends the file is opened again "r+b" and its header rewritten with the real one
@@ -282,12 +282,12 @@ const char kPresetFolders[] = "/fat32/presets", kPresetFolder[] = "/fat32/preset
 //    write fails, or the cache later reads another length, every later render counts.
 // A12 Stock's loader takes at most 882,000 frames (20 s at 44.1 kHz): a preview
 //    stops there, and a key is never given more frames than that. A save writes its
-//    whole edit, up to kSaveMaxFrames (sample-studio-009 cut a x0.54 save of a 15.9 s
-//    source at 20 s); a longer save goes on its key as its first 20 s, and says so.
+//    whole edit, up to kSaveMaxFrames (so a x0.54 save of a 15.9 s source isn't cut
+//    at 20 s); a longer save goes on its key as its first 20 s, and says so.
 const u32 kMaxFrames = 882000;
 const u32 kSaveMaxFrames = 4000000;   // ~90 s at 44.1 kHz; frame x 1024 waveform bins stays in 32 bits
-// A47 (Max: "a setting which is full, which renders it until silence"): tail 11 reads "full": the print runs on
-// until it stays under -60 dBFS for 2 s after the edit (sample_studio_player.cpp P15), at most kFullTailS more.
+// A47: tail 11 reads "full": the print runs on
+// until it stays under -60 dBFS for 2 s after the edit (player.cpp P15), at most kFullTailS more.
 const u32 kTailFull = 11, kFullTailS = 30;
 u32 key_frames(u32 frames) { return frames > kMaxFrames ? kMaxFrames : frames; }
 
@@ -343,17 +343,17 @@ const char* base_name(const char* path) {
     return base;
 }
 bool guards_clear() { return !host::library_busy(); }
-// A28 Edit from every sample browser (Max: "make it accessible from wherever"). Stock has one
+// A28 Edit from every sample browser. Stock has one
 //    sample browser, the library, on every track (Shift + Sample, 8c09256a -> 8c094178(4)), and the
 //    five hooks run in all of it. On a drum sampler or multisampler the selected key (8d4d6c98) is a
-//    MIDI note, not a 0..23 slot (016-017 tested slot < 24, so the label never came); stock's
+//    MIDI note, not a 0..23 slot (a test of slot < 24 never shows the label); stock's
 //    region lookup 8d589370(track, note) folds it, so a key with a region is the test. The engine is
 //    the SDK's sample-page engine (sdk_sample_ui_engine: an owned page-2 or page-7 machine counts as
 //    the sampler or multisampler). Any other track opens the file the browser has highlighted, in
 //    file mode: its full path from stock's tree (8c0a84b4(&string, 8c0ad5dc()), as stock's own press
 //    reads it), its PCM from the cache, where the highlight has already put it (8c0a3054 -> desired
-//    list at priority 99); no key, so no hold, no notes, and Save writes the file only.
-//    Evidence: side-session notes sample-studio-re-browsers.md.
+//    list at priority 99); no key, so no hold and no notes;
+//    Save writes the file only.
 bool selected(u32& track, u32& engine, u32& slot) {
     track = host::selected_track();
     if (track >= 8) return false;
@@ -367,18 +367,18 @@ bool selected(u32& track, u32& engine, u32& slot) {
 // write files under the library, so once the studio has written and the library is shown again, it does the
 // same, then queues the library's own listing step as entering the library does (8c0a2ee4: 8d4dd728(0, 0,
 // 8c0a349c, 0)), which lists the folder again with the highlighted entry kept. Without it New kit and the
-// saved files appeared only after a restart (Max on 020/021).
+// saved files would appear only after a restart.
 bool library_stale = false;
 void relist_library() {
     library_stale = false;
     host::relist_library();
     log(__LINE__, "library: listed again after the studio's save");
 }
-// A37 (Max on 022: New kit still not in presets > snapshot): stock's preset browser reads an index of every
+// A37 (a new kit in presets > snapshot): stock's preset browser reads an index of every
 // preset that stock builds at boot ("scan presets": 8d4eefec(1), 8c0b8d30), not the folder, and the library's
 // listing (A35) is apart from it. Stock's own preset rename and delete build it again with 8d4eefec(0) on the UI
 // thread (8d4ef74c, 8d4ef670); the studio does the same once a new kit is written, on closing. It reads the card:
-// about 1.4 s at boot (log 17.57.36), so the screen holds that long, once, after a new kit.
+// about 1.4 s at boot, so the screen holds that long, once, after a new kit.
 bool presets_stale = false;
 void rescan_presets() {
     presets_stale = false;
@@ -400,7 +400,7 @@ i32 frames_of(const unsigned char* entry) {
 u32 files_set_ms;
 bool files_pending;
 bool waveform_said;   // the first waveform of this opening is logged once it's drawn
-// The output pages' span and the finish flash (A20, sample-studio-012), and the header's slide.
+// The output pages' span and the finish flash (A20), and the header's slide.
 u32 axis_frames, axis_from, axis_to, axis_t0;
 bool axis_moving;
 u32 flash_t0;
@@ -455,7 +455,7 @@ struct Edit {
     u32 stretch;             // percent, 25..400
     i32 pitch;               // semitones (beat), -24..24
     u32 beat, fit, grain;    // fit 0 off, 1..4: 1, 2, 4, 8 bars
-    // process (sample-studio-017, Max's layout: rate bits drive filter / fx i fx ii tail comp)
+    // process (A25: rate bits drive filter / fx i fx ii tail comp)
     u32 rate_index, bits_index, drive;
     i32 sweep;               // the filter: -48..-1 low-pass, 0 off, 1..48 high-pass
     u32 comp;                // 0..100
@@ -468,9 +468,9 @@ bool same_edit(const Edit& a, const Edit& b) {
 void neutral(Edit& e) {
     e.fade_in = e.fade_out = 0;
     e.normal = e.silence = e.dc = e.chans = 0;
-    e.snap = 1;              // markers snap to zero crossings (Max, 012)
+    e.snap = 1;              // markers snap to zero crossings
     e.slices = 8;
-    e.chop_mode = 1;         // slice starts at the transients; even is a turn away (Max, 012)
+    e.chop_mode = 1;         // slice starts at the transients; even is a turn away
     e.sens = 50;
     e.slice = 0;
     e.chop_fade = 2;
@@ -527,8 +527,8 @@ const char* effect_name(u32 id) {
 }
 // A24: an edit whose audition still needs a rendered preview.
 bool preview_render(const Edit& e) { return needs_render(e) && !live_ok(e); }
-// A32 (Max on 020: "changing any other value (e.g. drive) rerenders the audio rather than applying those
-// effects to the new timestretched render"): with beat retime the preview holds only what the live chain
+// A32: changing any other value (e.g. drive) applies it to the timestretched render rather than
+// rendering the audio again. With beat retime the preview holds only what the live chain
 // can't do, the source between the markers, reversed, retimed; the gain, colour, DC, fades and channels
 // play live over it (preview_live). These are the fields that render hears.
 bool same_time(const Edit& a, const Edit& b) {
@@ -1486,7 +1486,7 @@ u32 out_amp(u32 f0, u32 f1) {
     }
     const Edit& e = studio.edit;
     const u32 src_len = e.end - e.start;
-    // output frames onto source frames (sample-studio-011: f * (src / 64 + 1) passed 2^32 past ~6 s sources)
+    // output frames onto source frames (f * (src / 64 + 1) would pass 2^32 past ~6 s sources)
     const u32 s0 = scale_frames(f0, src_len, n), s1 = scale_frames(f1, src_len, n);
     const u32 a = e.reverse ? e.end - (s1 < src_len ? s1 : src_len) : e.start + s0;
     const u32 b = e.reverse ? e.end - s0 : e.start + (s1 < src_len ? s1 : src_len);
@@ -1652,7 +1652,7 @@ void remove_range(const Removal& r) {
     }
 }
 void passed_job(u32) { remove_range(passed); }
-// 018: previews an earlier boot left (a power-off with the studio open): the first time a track's
+// Previews an earlier boot left (a power-off with the studio open): the first time a track's
 // studio opens each boot, its names t<track>-1..64 (and their segments) go, on the worker, before
 // any render of this opening (the queue runs in order). Serials restart at 1 every boot.
 Removal leftovers;
@@ -1995,7 +1995,7 @@ void load_kit() {
     }
     bool laid_out = base != nullptr;
     for (u32 k = 0; k < 24; ++k) note_of[k] = 0;
-    // A42 (Max on 023: "kit keys not found" on a kit New kit made, 8 pads): a kit with fewer pads than keys gives
+    // A42 (e.g. a kit New kit made, 8 pads): a kit with fewer pads than keys gives
     // some keys no entry or another key's; a pad is the first key whose entry is that place, the rest are files
     u32 pads = 0;
     for (u32 k = 0; k < 24 && laid_out; ++k) {
@@ -2030,7 +2030,7 @@ void load_kit() {
         if (k == 0) copy_bytes(kit_undo.entries[0], studio.on_key ? studio.key_entry : studio.origin, kEntryBytes);
         assign_file(render.track, kDrumSampler, note_of[first + k], render.slice_paths[k],
                     key_frames(render.slice_frames[k]), 60);
-        // A34 (Max on 020: slices on the kit played two octaves up until the pad went to -24): the drum
+        // A34 (else slices on the kit play two octaves up): the drum
         // sampler's assignment leaves the key's root and fine as they were; a slice is at its own pitch
         // on root 60, fine 0, as stock's kits (zebra.json: pitch.keycenter 60, tune 0)
         unsigned char* placed = region_entry(render.track, note_of[first + k]);
@@ -2059,8 +2059,8 @@ void load_kit() {
     } else {
         set_card(line, base_name(render.slice_paths[0]), 2500);
     }
-    // A43 (Max on 023: after this kit "a single very compressed waveform to the left"): the studio stayed on
-    // the first slice, here 0.15 s; now it stays on the source and its edit, as New kit does (A30). The keys
+    // A43: on the first slice (here 0.15 s) the studio would show a single, very compressed
+    // waveform at the left; it stays on the source and its edit, as New kit does (A30). The keys
     // hold the slices; the studio plays the source by its hash, never through the key (flush_live writes nothing)
     log(__LINE__, "kit: the studio stays on %s", studio.path);
 }
@@ -2197,7 +2197,7 @@ void after_render(u32) {
         return;
     }
     {
-        // Everything studio_chain.py needs to remake the file (OP-XY-Dev tools/sample_studio).
+        // Everything tests/studio_chain.py needs to remake the file.
         const Edit& e = render.edit;
         files_written();
         log(__LINE__, "saved %s -> %s: %d frames, %d ch -> %d, %d Hz (full render, %s, %d ms)", render.source,
@@ -2659,7 +2659,7 @@ void turn_trim(u32 encoder, i32 detents, bool shift, u32 t) {
     const u32 n = static_cast<u32>(detents < 0 ? -detents : detents);
     const u32 total = total_frames();
     const u32 min_len = total > 64 ? 64 : 1;
-    (void)shift;   // sample-studio-017: no Shift row (silence, dc and chans went)
+    (void)shift;   // no Shift row (no silence, dc or chans)
     if (studio.row == 0) {
         if (encoder <= 1) {
             const u32 step = marker_step() * n;
@@ -2744,10 +2744,10 @@ void turn_color(u32 encoder, i32 detents, bool) {
         else if (encoder == 1) e.bits_index = step_by(e.bits_index, detents, 1, 0, 8);
         else if (encoder == 2) e.drive = step_by(e.drive, detents, 2, 0, 100);
         else {
-            // the sweep: left low-pass, right high-pass, through off. 020 (Max: "scrolling down should
-            // lower the frequency"): the knob's place p runs -48..48 and the low-pass side is mirrored,
+            // the sweep: left low-pass, right high-pass, through off. Turning down lowers the
+            // frequency: the knob's place p runs -48..48 and the low-pass side is mirrored,
             // so one step left of off is the low-pass at 12 kHz and the far left is 50 Hz
-            // (e.sweep -48 and -1); the high-pass side rises from 50 Hz as before.
+            // (e.sweep -48 and -1); the high-pass side rises from 50 Hz.
             const i32 limit = static_cast<i32>(dsp::kCutoffCount);
             const i32 p = sweep_place(e.sweep);
             i32 v = p + detents;
@@ -2764,7 +2764,7 @@ void turn_color(u32 encoder, i32 detents, bool) {
 }
 void turn(u32 encoder, i32 detents) {
     if (!detents) return;
-    const bool shift = false;   // sample-studio-017: no page has a Shift row
+    const bool shift = false;   // no page has a Shift row
     const i32 id = static_cast<i32>(studio.page * 16 + encoder + (shift ? 8 : studio.row * 4));
     const u32 t = now_ms();
     if (id != studio.gesture) {
@@ -2806,7 +2806,7 @@ void hundredths(char* out, u32 size, u32& n, u32 v) {
     const char d[4] = {'.', static_cast<char>('0' + v / 10 % 10), static_cast<char>('0' + v % 10), 0};
     append(out, size, n, d);
 }
-// 020 (Max: "0.000s doesn't quite fit"): a readout is 5 characters at most with its unit: "1.23",
+// A readout is 5 characters at most with its unit ("0.000s" doesn't fit): "1.23",
 // "12.3", "123" (then "s").
 void millis_as_seconds(char* out, u32 size, u32& n, u32 ms) {
     append_number(out, size, n, ms / 1000);
@@ -2878,7 +2878,7 @@ void ribbon(u32 p, i32 x0, i32 x1, const i32* amp, u32 columns, u32 key) {
     }
     path.key = key;
 }
-// A waveform as two edges (sample-studio-021, Max on 020: "three visual equally spaced divets"): its
+// A waveform as two edges (no seams, as three equally spaced dents would show): its
 // top on node `top` and its bottom on `top + 8` (dim0..3 -> dimlo0..3, lit0..3 -> litlo0..3), each a
 // ribbon kEdge thick toward the middle (half a pixel: its closing edges stay over the device's 1/4 px
 // sliver limit). No outline crosses the waveform, so the quarters meet without a seam or a pinch.
@@ -2919,7 +2919,7 @@ void reset_frame() {
         for (u32 p = 0; p < panel::kPaths; ++p) ribbon(p, -20 * 1024, 20 * 1024, amp, 1, path_key);
         paths_ready = true;
         // The placeholders took this key: the first waveform needs another, or the renderer keeps them
-        // (sample-studio-007: blank until the first encoder turn).
+        // (blank until the first encoder turn).
         ++path_key;
     }
 }
@@ -2954,7 +2954,7 @@ i32 x_of(const View& v, u32 f) {
     const u32 d = f - v.v0;
     return q(kX0) + static_cast<i32>(d * kWidth / span * 1024u + d * kWidth % span * 1024u / span);
 }
-// A46 (Max: "when reversing, let's flip the waveform rather than playing the playhead in reverse"): on the trim
+// A46: reversing flips the waveform rather than running the playhead in reverse. On the trim
 // page a reversed edit shows its source mirrored, its end at the left, so the playhead runs left to right.
 bool mirrored() { return studio.page == kTrim && studio.edit.reverse; }
 i32 x_shown(const View& v, u32 f) { return mirrored() ? q(kX0) + q(kX0 + kWidth) - x_of(v, f) : x_of(v, f); }
@@ -3075,7 +3075,7 @@ bool rendered_so_far(u32 n, u32& covered) {
     }
     if (q16 > 65536u) q16 = 65536u;
     if (quick_shown() && studio.preview_frames && n) {
-        // Max on 014: the bar goes on from where the first part left it, not from 0
+        // the bar goes on from where the first part left it, not from 0
         const u32 base = studio.preview_frames >= n ? 65536u : scale_frames(studio.preview_frames, 65536u, n);
         q16 = base + scale_frames(q16, 65536u - base, 65536u);
     }
@@ -3101,8 +3101,8 @@ void red_quarter(u32 qd, i32 cx, i32 x0, i32 x1, u32 f0, u32 f1, u32 covered, bo
     }
     show(panel::N_RED0 + qd, cx, q(kStageMid));
 }
-// The progress bar and the finish flash fill the stage's height behind the waveform (Max on
-// 012: "a full height red progress bar in the background").
+// The progress bar and the finish flash fill the stage's height behind the waveform:
+// a full-height red progress bar in the background.
 const i32 kBarAmp = 50 * 1024;
 i32 bar_amp(u32, u32) { return kBarAmp; }
 void green_quarter(u32 qd, i32 cx, u32 shade) {
@@ -3597,9 +3597,9 @@ bool track_held() {
         if (host::note_held(studio.track, n)) return true;
     return false;
 }
-// A33 (Max on 020: "a pad should trigger its appropriate slice"): on the slice page the track's
+// A33: a pad triggers its own slice. On the slice page the track's
 // first key (53, the kit's first pad, as New kit lays slices out) plays slice 1, the next slice 2, and
-// so on; a key past the last slice, or a note too short to be seen held, plays as before.
+// so on; a key past the last slice, or a note too short to be seen held, plays the whole edit.
 unsigned char notes_before[128];
 u32 struck_note = 128, struck_ms;
 // The note last pressed on the track within kTapMs (it may show a frame before or after the serial moves).
@@ -3663,7 +3663,7 @@ void playhead(u32 t) {
     u32 out_f, src_f;
     const u32 n = output_length();
     if (play.growing) {
-        // a render under way (bug on 016): its own output frames, held where the card's frames end
+        // a render under way: its own output frames, held where the card's frames end
         const u32 on_card = busy && render.serial == play.which ? render.synced : at;
         out_f = at < on_card ? at : on_card;
         const u32 o = scale_frames(out_f < n ? out_f : n, src, n ? n : 1);
@@ -3690,7 +3690,7 @@ void playhead(u32 t) {
     }
 }
 // The header: the SDK's two-row page header (opxy/page_header.hpp), as the synths' pages use
-// it, so an encoder press moves the rows with the same eased slide (Max, 012). Its eight bar
+// it, so an encoder press moves the rows with the same eased slide. Its eight bar
 // nodes are bar0..7 and its sixteen text slots the page's title, value, under_title and
 // under_value slots 0..15, in that order. `page` is the bright row.
 void studio_header(const char* const* top, const char* const* top_values, const char* const* under,
@@ -3720,7 +3720,7 @@ void trim_values() {
     const Edit& e = studio.edit;
     const u32 rate = studio.ready ? studio.view.rate : 44100;
     u32 n;
-    // 018: units on every readout, as stock's pages show them (7 characters fit a header value)
+    // units on every readout, as stock's pages show them (7 characters fit a header value)
     seconds(values[0], 12, e.start, rate);
     n = 0; while (values[0][n]) ++n; append(values[0], 12, n, "s");
     seconds(values[1], 12, e.end, rate);
@@ -3751,7 +3751,7 @@ void chop_values() {
 void time_values() {
     const Edit& e = studio.edit;
     u32 n = 0;
-    // playback speed (sample-studio-010): x2.00 twice as fast and half as long; e.stretch is the length in percent
+    // playback speed: x2.00 twice as fast and half as long; e.stretch is the length in percent
     append(values[0], 12, n, "x");
     hundredths(values[0], 12, n, (10000u + e.stretch / 2u) / e.stretch);
     n = 0;
@@ -3775,7 +3775,7 @@ void color_values() {
     if (!e.sweep) {
         append(values[3], 12, n, "off");
     } else {
-        append(values[3], 12, n, e.sweep < 0 ? "-" : "+");   // 020 (Max): - low-pass, + high-pass
+        append(values[3], 12, n, e.sweep < 0 ? "-" : "+");   // - low-pass, + high-pass
         hertz(values[3], 12, n, dsp::kCutoffHz[(e.sweep < 0 ? -e.sweep : e.sweep) - 1]);
     }
     n = 0; append_number(values[4], 12, n, e.send1); append(values[4], 12, n, "%");
@@ -3843,7 +3843,7 @@ void card() {
         }
     }
 }
-const char* const kPageNames[4] = {"trim", "slice", "retime", "process"};   // Max, 2026-11-14
+const char* const kPageNames[4] = {"trim", "slice", "retime", "process"};   // M1..M4
 void page() {
     reset_frame();
     show(panel::N_BG, 0, 0);
@@ -3856,7 +3856,7 @@ void page() {
         const char* row_a_v[4] = {values[0], values[1], values[2], values[3]};
         const char* row_b_t[4] = {"level", "normal", "reverse", "snap"};
         const char* row_b_v[4] = {values[4], values[5], values[6], values[7]};
-        studio_header(row_a_t, row_a_v, row_b_t, row_b_v, studio.row);   // 017: no Shift row
+        studio_header(row_a_t, row_a_v, row_b_t, row_b_v, studio.row);   // no Shift row
     } else {
         const char* t_a[4] = {"", "", "", ""};
         const char* t_b[4] = {"", "", "", ""};
@@ -3916,7 +3916,7 @@ void page() {
 }
 // The way in, over M1: "edit" on a sampler track (M1 opens) or while Shift is held; on a drum
 // sampler or multisampler, where M1 is stock's previous key, nothing until Shift is held, so stock's
-// arrow shows alone (Max on 016: "make it accessible from wherever"; on 019: "shift: edit" sat over
+// arrow shows alone ("shift: edit" would sit over
 // the arrow).
 void label() {
     reset_frame();
@@ -3948,7 +3948,7 @@ bool open_from_library(bool shift) {
     char path[kPathBytes];
     if (selected(track, engine, slot)) {
         if (!shift && engine != kSampler) return false;   // M1 is stock's previous key on drum and multi
-        // A31 (Max on 020): the highlighted file, if it isn't the key's own (the library puts it on the key
+        // A31: the highlighted file, if it isn't the key's own (the library puts it on the key
         // on a sampler, not on a drum sampler or multisampler)
         const unsigned char* entry = region_entry(track, slot);
         const char* own = entry ? host::entry_path(entry) : "";
@@ -4111,8 +4111,8 @@ bool press_shift(u32 key) {
         if (key == kKeyM1) {
             undo_step();
         } else if (key == kKeyM2) {
-            // A26 (Max: "Compare plays the original, and Play plays the current modified one. Each
-            // latches, and turns to Stop"): a press plays, a second stops, the other switches over
+            // A26: Compare plays the original and Play the current edit; each
+            // latches and turns to Stop: a press plays, a second stops, the other switches over
             if (play.on && studio.compare) {
                 stop_play();
             } else {
@@ -4169,7 +4169,7 @@ bool frame(i32 elapsed) {
         ++studio.generation;
     }
     if (studio.mode == kOpen && host::selected_track() != studio.track && !bounce.on) {
-        // 018: another track selected under the studio: it closes (the edit kept for later), so the
+        // another track selected under the studio: it closes (the edit kept for later), so the
         // old track sounds again and the new one isn't held
         log(__LINE__, "track changed under the studio: closed");
         close_studio(true);

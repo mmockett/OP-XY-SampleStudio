@@ -261,7 +261,7 @@ def bake(s, start=None, end=None, trim_db=None, rev=False, dc=False, gain_db=Non
          normalise_db=None, fade_in=0, fade_out=0, chans='keep'):
     """The trim page's chain, in its fixed order: markers, reverse, gain or
     normalise (on the 16-bit samples), DC, fades, channels. Returns the gain
-    applied, as Q4.28. The device (sample_studio.cpp) runs the same order."""
+    applied, as Q4.28. The device (editor.cpp) runs the same order."""
     b, e = (start or 0), (end if end is not None else len(s.frames))
     if trim_db is not None:
         tb, te = trim_bounds(s, trim_db)
