@@ -153,6 +153,13 @@ cd tests
 OPEN_XY=../../open-xy python3 -m unittest test_sample_studio
 ```
 
+The SDK's extension check builds and runs the C++ host test,
+`sample_studio/tests/chain.cpp`, which runs the render chain itself:
+
+```sh
+python3 ../open-xy/sdk.py test --extension sample_studio
+```
+
 The screens above are drawn by the studio's own code: `tools/screens` builds it
 in a Linux container against stand-in SDK services, sets each scene, and renders
 the frames in the OP-XY's screen font.

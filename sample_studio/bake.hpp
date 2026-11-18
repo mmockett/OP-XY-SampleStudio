@@ -41,7 +41,7 @@ inline i32 scale(i32 x, u32 gain) {
     return high * 16 + (low >> 12);
 }
 
-// Bounce phase 1's TPDF dither (open-xy local/bounce-phase1 bounce.hpp), to 16 bits.
+// TPDF dither to 16 bits.
 struct Dither {
     u32 state;
     u32 next() {
