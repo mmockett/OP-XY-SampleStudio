@@ -109,8 +109,28 @@ void playing(u32 start, u32 end, u32 ms) {
     play.rate = kRate;
     play.t0 = 0u - ms;
 }
+// The SDK draws a frame only when the slots the artwork bound pass draw::valid's rules
+// (sample_studio_host.cpp, bound_valid); a frame that fails is dropped on the device, so fail here.
+bool drawable(const Frame& f) {
+    using namespace opxy::draw;
+    for (u32 p = 0; p < panel::kPaths; ++p) {
+        if (!f.paths[p].key) return false;
+        for (u32 i = 0; i < panel::kPoints; ++i)
+            if (f.paths[p].points[i].x < -path_extent * unit || f.paths[p].points[i].x > path_extent * unit ||
+                f.paths[p].points[i].y < -path_extent * unit || f.paths[p].points[i].y > path_extent * unit) return false;
+    }
+    for (u32 i = 0; i < panel::kNodes; ++i)
+        if (!placement(f.nodes[i].x, f.nodes[i].y, f.nodes[i].scale) || !rotation_valid(f.nodes[i].cos, f.nodes[i].sin) ||
+            f.nodes[i].shade >= panel::kPalette || f.nodes[i].paint > fill_and_stroke) return false;
+    for (u32 i = 0; i < panel::kTexts; ++i)
+        if (!placement(f.texts[i].x, f.texts[i].y, f.texts[i].scale) || !terminated(f.texts[i].chars, text_capacity)) return false;
+    for (u32 i = 0; i < page_controls; ++i)
+        if (!terminated(f.header[i], header_capacity)) return false;
+    return true;
+}
 void write(const char* folder, const char* name) {
     page();
+    if (!drawable(output)) { std::fprintf(stderr, "%s: the SDK would not draw this frame\n", name); std::exit(1); }
     char path[256];
     std::snprintf(path, sizeof path, "%s/%s.bin", folder, name);
     FILE* f = std::fopen(path, "wb");
@@ -197,6 +217,13 @@ void draw_all(const char* out) {
     studio.mode = kSaving;
     set_card("printing the fx live", "35 s max; sample stops", 0);
     write(out, "09-printing");
+
+    // The closed studio's frame over the library ("edit" over M1): checked, not rendered.
+    studio.mode = kClosed;
+    harness::shift = false;
+    label();
+    if (!drawable(output)) { std::fprintf(stderr, "label: the SDK would not draw this frame\n"); std::exit(1); }
+    std::printf("label (checked)\n");
 }
 }}}}}  // namespace opxy::extensions::sample_studio::edit::scenes
 
