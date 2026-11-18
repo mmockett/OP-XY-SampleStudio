@@ -7,6 +7,7 @@ matches the exact Python reference here (studio_ref.py, studio_chain.py) sample 
 The SDK's side (its sites, services and tooling) is checked against an Open-XY checkout with
 Sample Studio's capability: OPEN_XY, or ../open-xy beside this repository, as CI has it.
 """
+import base64
 import json
 import math
 import os
@@ -137,7 +138,9 @@ class OptIn(unittest.TestCase):
             e = extensions.extension_at(root)
             self.assertTrue(e.sample_studio)
             self.assertTrue(e.linked)                                          # the editor and player are its code
-            self.assertEqual(extensions.metadata([e], {'sample_studio': 'personal'})[0]['sample_studio'], True)
+            row = extensions.metadata([e], {'sample_studio': 'personal'})[0]['sample_studio']
+            self.assertEqual(row['asset'], 'sample_studio.svg')                 # the builder installs it
+            self.assertEqual(base64.b64decode(row['artwork']), PANEL_SVG.read_bytes())
             (root / 'extension.json').write_text(json.dumps(dict(data, sample_studio={'x': 1})))
             with self.assertRaises(Exception):
                 extensions.extension_at(root)                                  # no options yet
@@ -214,17 +217,17 @@ class Panel(unittest.TestCase):
         self.assertEqual(len(re.search(r'kAdvance\[95\] = \{([^}]*)\}', header).group(1).split(',')), 95)
 
     def test_asset_installed_only_with_the_extension(self):
+        from unittest import mock
         from tooling import native
-        original = native._prepare_assets_without_sample_studio
-        native._prepare_assets_without_sample_studio = lambda *a: {}
         studio = Studio()
         studio.root = EXT
-        try:
-            self.assertEqual(native.prepare_assets(None, None, []), {})
-            self.assertEqual(native.prepare_assets(None, None, Built([], [studio])),
-                             {'content/display/sample_studio.svg': PANEL_SVG.read_bytes()})
-        finally:
-            native._prepare_assets_without_sample_studio = original
+        studio.id = 'sample_studio'
+        profile = {'stock_catalog_sha256': native.sha(b'{}')}
+        with mock.patch.object(native, 'extend_catalog', lambda *a: b'{}'), \
+                mock.patch.object(native.stock_content, 'check_output', lambda *a: None):
+            self.assertNotIn('content/display/sample_studio.svg', native.prepare_assets(b'{}', profile, Built([])))
+            outputs = native.prepare_assets(b'{}', profile, Built([], [studio]))
+            self.assertEqual(outputs['content/display/sample_studio.svg'], PANEL_SVG.read_bytes())
 
 
 class Source(unittest.TestCase):
@@ -503,7 +506,7 @@ class Preview(unittest.TestCase):
         # the keys play the edit, not the filtered original through the track (A22, P7)
         studio = STUDIO.read_text()
         player = PLAYER.read_text()
-        send = (PLATFORM / 'drum_send.cpp').read_text()
+        mixer = (PLATFORM / 'mixer.cpp').read_text()
         follow = re.search(r'void follow_notes\(u32 t\) \{(.*?)\n\}', studio, re.S).group(1)
         self.assertIn('send_hold(studio.track + 1)', follow)
         self.assertIn('if (studio.mode == kOpen && studio.ready) {', follow)
@@ -516,16 +519,16 @@ class Preview(unittest.TestCase):
         self.assertIn('send_hold(0);', close)
         opened = re.search(r'void begin_studio\(u32 track, bool file\) \{(.*?)\n\}', studio, re.S).group(1)
         self.assertIn('note_seen = keyless || track >= 8 ? 0 : track_notes();', opened)   # a sounding note doesn't play it
-        # the audio board: the voice hook zeroes only the held track, and lets go without a resend
-        self.assertIn('if (sdk_studio_voice) sdk_studio_voice(const_cast<i32*>(kVoiceOutput), track);', send)
-        self.assertIn('__attribute__((weak))', send[send.index('void sdk_studio_voice'):][:200])
+        # the audio board: the mixer's voice site hands the player each rendered voice, which zeroes
+        # only the held track and lets go without a resend
+        self.assertIn('    sdk_studio_voice(kVoiceOutput, track);\n', mixer)
         voice = re.search(r'void voice\(i32\* out, u32 track\) \{(.*?)\n\}', player, re.S).group(1)
         self.assertIn('mute_now = hold_age <= kTimeoutBlocks ? hold_value : 0;', voice)
         self.assertIn('if (!was && !now) return;', voice)
         self.assertIn('if (hold_age <= kTimeoutBlocks) hold_age = hold_age + 1;', player)
         self.assertLess(((1 << 31) >> 6) * 63, 1 << 31)   # the ramp stays in 31 bits
         profile = json.loads((ROOT / 'profiles/opxy-1.2.1.json').read_text())
-        self.assertIn('sampleStudio', profile['services']['drum_sends'])
+        self.assertIn('sampleStudio', profile['services']['mixer'])
 
     def test_play_while_rendering_level_and_one_bar(self):
         # play what's rendered so far, as segment files; one progress bar; the key's level (A23, P4, P8)
