@@ -17,6 +17,7 @@ bool sent_on[15];
 unsigned char kit[24][opxy::studio::entry_bytes];
 bool has[24];
 opxy::u32 put[24];                                       // put_file calls per key
+opxy::u32 relists, rescans;                              // the library listed again, the preset index built again
 }
 
 namespace opxy { namespace studio {
@@ -56,8 +57,8 @@ bool highlighted(char* out, u32 size) {
 }
 bool highlight_seen() { return harness::highlight_seen; }
 void stop_audition() {}
-void relist_library() {}
-void rescan_presets() {}
+void relist_library() { ++harness::relists; }
+void rescan_presets() { ++harness::rescans; }
 u32 note_serial(u32) { return harness::notes; }
 bool note_held(u32, u32) { return false; }
 unsigned char* key_entry(u32, u32 key) {
@@ -68,9 +69,13 @@ i32 entry_frames(const unsigned char*) { return 0; }
 SampleRegion entry_region(const unsigned char*) { return SampleRegion(); }
 i32 entry_level(const unsigned char*) { return 0; }
 bool entry_reversed(const unsigned char*) { return false; }
-u32 entry_root(const unsigned char*) { return 60; }
-i32 entry_fine(const unsigned char*) { return 0; }
-void set_entry_tuning(unsigned char*, u32, i32) {}
+// The pad record's root and fine bytes (stock_sample.hpp pad_record: kRoot 24, kFine 28).
+u32 entry_root(const unsigned char* entry) { return entry ? entry[24] : 60; }
+i32 entry_fine(const unsigned char* entry) { return entry ? static_cast<signed char>(entry[28]) : 0; }
+void set_entry_tuning(unsigned char* entry, u32 root, i32 fine) {
+    entry[24] = static_cast<unsigned char>(root);
+    entry[28] = static_cast<unsigned char>(fine);
+}
 void set_entry_whole(unsigned char*, u32) {}
 bool put_file(u32, u32, u32 key, const char* path, u32, u32) {
     if (key < 53 || key >= 77) return false;

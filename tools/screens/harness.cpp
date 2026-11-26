@@ -291,8 +291,50 @@ void kit_checks() {
         for (u32 k = 0; k < 24; ++k) EXPECT(harness::put[k] == (k < 8 ? 1u : 0u));
         for (u32 k = 0; k < 8; ++k) EXPECT(!std::strcmp(host::entry_path(harness::kit[k]), render.slice_paths[k]));
         EXPECT(kit_undo.valid && kit_undo.count == 8);
+        // each slice at its own pitch: root 60, fine 0 (an empty key's 0, 0 plays two octaves up)
+        for (u32 k = 0; k < 8; ++k) EXPECT(harness::kit[k][24] == 60 && harness::kit[k][28] == 0);
     }
     std::printf("this kit on a fresh kit (checked)\n");
+}
+
+// Earlier device faults, as behaviour.
+void earlier_checks() {
+    // "edit" sat over stock's arrow on a drum sampler: there it waits for Shift.
+    close_studio(false);
+    studio.mode = kClosed;
+    harness::engine = opxy::studio::engine_drum;
+    harness::shift = false;
+    harness::clock += 1000;
+    frame(16);
+    EXPECT(!shows_edit());
+    harness::shift = true;
+    harness::clock += 100;
+    EXPECT(frame(16) && shows_edit());
+    harness::shift = false;
+    harness::engine = opxy::studio::engine_sampler;
+    // Pads 14 and up were silent with 24 slices under tape retime: every slice's source range lies
+    // inside the source (the cuts are output frames, the live chain plays source frames).
+    open_scene(kChop);
+    studio.edit.start = 0;
+    studio.edit.end = 86391;
+    studio.edit.stretch = 172;
+    studio.edit.beat = 0;
+    studio.cut_count = 24;
+    const u32 n = output_length();
+    EXPECT(n > studio.edit.end);
+    for (u32 k = 0; k <= 24; ++k) studio.cuts[k] = static_cast<u32>(static_cast<unsigned long long>(n) * k / 24);
+    for (u32 k = 1; k <= 24; ++k) {
+        u32 a = 0, b = 0;
+        slice_source(studio.edit, k, a, b);
+        EXPECT(a < b && b <= studio.edit.end);
+    }
+    // A save lists itself in the library, and a new kit in the preset index, once the studio closes.
+    harness::relists = harness::rescans = 0;
+    library_stale = presets_stale = true;
+    studio.mode = kOpen;
+    close_studio(false);
+    EXPECT(harness::relists == 1 && harness::rescans == 1);
+    std::printf("earlier device faults (checked)\n");
 }
 }}}}}  // namespace opxy::extensions::sample_studio::edit::scenes
 
@@ -300,5 +342,6 @@ int main(int argc, char** argv) {
     opxy::extensions::sample_studio::edit::scenes::draw_all(argc > 1 ? argv[1] : ".");
     opxy::extensions::sample_studio::edit::scenes::file_mode_checks();
     opxy::extensions::sample_studio::edit::scenes::kit_checks();
+    opxy::extensions::sample_studio::edit::scenes::earlier_checks();
     return 0;
 }
