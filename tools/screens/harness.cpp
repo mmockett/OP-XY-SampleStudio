@@ -346,6 +346,40 @@ void earlier_checks() {
     render.new_kit = false;
     std::printf("earlier device faults (checked)\n");
 }
+
+// Leaving the library for another browser on the same screen (the preset browser) without closing
+// the studio. The SDK hands the editor that browser's frames and draws stock's whatever the editor
+// returns (sample_studio_host.cpp, tests/test_sample_studio.py there); here, the editor's side: it
+// closes at once, and the close does its work. 029 and 030 skipped this frame, so these never ran.
+void leave_checks() {
+    // a save listed in the library, and the track's own engine sounding again
+    open_scene(kTrim);
+    harness::off_top = false;
+    harness::relists = 0;
+    library_stale = true;
+    std::memset(harness::sent_on, 0, sizeof harness::sent_on);
+    harness::off_top = true;
+    harness::clock += 16;
+    EXPECT(!frame(16));                       // the editor draws nothing over the preset browser
+    EXPECT(studio.mode == kClosed);
+    EXPECT(harness::relists == 1);
+    EXPECT(harness::sent_on[7] && harness::sent[7] == 0);
+    // a new kit: in stock's preset index when written, and the studio closes as the preset browser opens
+    harness::off_top = false;
+    open_scene(kChop);
+    harness::rescans = 0;
+    render.new_kit = true;
+    render.cut_count = 8;
+    copy_text(render.kit_folder, "/fat32/presets/snapshot/break.preset", sizeof render.kit_folder);
+    load_kit();
+    render.new_kit = false;
+    EXPECT(harness::rescans == 1);
+    harness::off_top = true;
+    harness::clock += 16;
+    EXPECT(!frame(16) && studio.mode == kClosed);
+    harness::off_top = false;
+    std::printf("leaving for another browser (checked)\n");
+}
 }}}}}  // namespace opxy::extensions::sample_studio::edit::scenes
 
 int main(int argc, char** argv) {
@@ -353,5 +387,6 @@ int main(int argc, char** argv) {
     opxy::extensions::sample_studio::edit::scenes::file_mode_checks();
     opxy::extensions::sample_studio::edit::scenes::kit_checks();
     opxy::extensions::sample_studio::edit::scenes::earlier_checks();
+    opxy::extensions::sample_studio::edit::scenes::leave_checks();
     return 0;
 }

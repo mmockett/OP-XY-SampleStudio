@@ -18,6 +18,7 @@ unsigned char kit[24][opxy::studio::entry_bytes];
 bool has[24];
 opxy::u32 put[24];                                       // put_file calls per key
 opxy::u32 relists, rescans;                              // the library listed again, the preset index built again
+bool off_top;                                            // another browser (presets) on the shared screen
 }
 
 namespace opxy { namespace studio {
@@ -39,7 +40,7 @@ bool file_exists(const char*) { return false; }
 void* allocate(u32) { return nullptr; }
 void release(void*) {}
 void popup(const char*) {}
-bool library_on_top() { return true; }
+bool library_on_top() { return !harness::off_top; }
 bool library_busy() { return false; }
 u32 selected_track() { return 0; }
 u32 sample_engine(u32) { return harness::engine; }
