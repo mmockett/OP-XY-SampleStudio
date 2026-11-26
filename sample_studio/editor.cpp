@@ -3960,26 +3960,12 @@ void label() {
     const bool needs_shift = ui == kDrumSampler || ui == kMultisampler;   // M1 is stock's previous key there
     if (!needs_shift || host::shift_held()) m_label(0, "edit");
 }
-// A28: a file highlighted in the library, asked of stock a few times a second while the studio is
-// closed. Stock's own record of the last highlighted file (highlight_seen) is written only once the
-// highlight moves, so a library just opened on a file has none.
-const u32 kHighlightCheckMs = 200;
-u32 highlight_checked_ms;
-bool highlight_now;
-bool file_highlighted() {
-    const u32 t = now_ms();
-    if (!highlight_checked_ms || t - highlight_checked_ms >= kHighlightCheckMs) {
-        char path[kPathBytes];
-        highlight_now = highlighted(path, sizeof path);
-        highlight_checked_ms = t ? t : 1;
-    }
-    return highlight_now;
-}
-bool label_wanted() {
-    if (!guards_clear()) return false;
-    u32 track, engine, slot;
-    return selected(track, engine, slot) || file_highlighted();   // A28: any track, a highlighted file
-}
+// A28: the label on every track while the library is on top and not renaming or deleting; on a
+// track without a sample key, M1 then opens the highlighted file, or asks for one on a folder.
+// The frame never asks stock's library tree for its highlight: building and freeing that string
+// from the screen's frame crashes the library as it opens. Stock's own record of the last
+// highlighted file isn't enough either: stock writes it only once the highlight moves.
+bool label_wanted() { return guards_clear(); }
 void take_snapshot() {
     u32 track, engine, slot;
     snapshot.valid = false;

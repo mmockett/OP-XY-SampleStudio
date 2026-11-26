@@ -8,6 +8,7 @@ opxy::u32 clock;                                         // now_ms()
 opxy::u32 engine = opxy::studio::engine_sampler;          // the selected track's sample engine
 const char* highlight = "";                              // the library's highlighted file ("" for none)
 bool highlight_seen;                                     // stock's record of the last highlighted file
+opxy::u32 highlight_asks;                                // highlighted() calls: stock's library tree
 opxy::u32 notes;                                         // the track's note serial
 opxy::i32 sent[15];                                      // the last value sent on each channel
 bool sent_on[15];
@@ -46,6 +47,7 @@ bool shift_held() { return harness::shift; }
 u32 project_bpm_x10() { return 1200; }
 u32 track_engine(u32) { return 0; }
 bool highlighted(char* out, u32 size) {
+    ++harness::highlight_asks;
     if (!size) return false;
     u32 n = 0;
     for (; harness::highlight[n] && n + 1 < size; ++n) out[n] = harness::highlight[n];

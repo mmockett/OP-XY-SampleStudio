@@ -231,22 +231,27 @@ void draw_all(const char* out) {
 bool shows_edit() { return !std::strcmp(output.texts[panel::T_M0].chars, "edit"); }
 void file_mode_checks() {
     // A synth track's library, just opened on a file: stock hasn't recorded a highlight yet, but
-    // the label is there on the first frame.
+    // the label is there on the first frame, and no frame asks stock's library tree (doing so from
+    // the frame crashed the library as it opened).
     close_studio(false);
     studio.mode = kClosed;
     harness::engine = 0;
     harness::highlight_seen = false;
-    harness::highlight = "/fat32/samples/user/drum loop.wav";
-    harness::clock += 1000;
-    EXPECT(frame(16) && shows_edit());
-    // a folder highlighted: no label
-    harness::highlight = "";
-    harness::clock += 1000;
-    EXPECT(!frame(16));
+    harness::highlight = "";   // a folder highlighted
+    harness::highlight_asks = 0;
+    for (u32 i = 0; i < 20; ++i) {
+        harness::clock += 100;
+        EXPECT(frame(16) && shows_edit());
+    }
+    EXPECT(harness::highlight_asks == 0);
+    // M1 on a folder asks for a sample and opens nothing; on a file it opens it
+    press(kKeyM1, false);   // a folder: the popup asks for a sample, and the key goes on to stock
+    EXPECT(studio.mode == kClosed);
+    EXPECT(harness::highlight_asks == 1);
     // M1 opens the file; the track's own engine is held silent (B3 145 is channel 7) and a note plays the edit
     harness::highlight = "/fat32/samples/user/drum loop.wav";
     std::memset(harness::sent_on, 0, sizeof harness::sent_on);
-    EXPECT(open_file(0, harness::highlight));
+    EXPECT(press(kKeyM1, false) && studio.mode == kOpen);
     EXPECT(studio.file_only && !studio.on_key);
     EXPECT(harness::sent_on[7] && harness::sent[7] == 1);
     studio.ready = true;   // the PCM in, as open_done leaves it: the whole file

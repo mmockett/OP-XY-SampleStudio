@@ -231,6 +231,19 @@ class Panel(unittest.TestCase):
 
 
 class Source(unittest.TestCase):
+    def test_no_frame_asks_the_librarys_tree(self):
+        # Building and freeing stock's highlighted-path string from the screen's frame crashed the
+        # library as it opened: only a key press asks for the highlight (open_from_library).
+        studio = STUDIO.read_text()
+        label = re.search(r'\nbool label_wanted\(\) \{(.*?)\n?\}', studio, re.S).group(1)
+        self.assertEqual(label.strip(), 'return guards_clear();')
+        frame = studio[studio.index('\nbool frame(i32 elapsed) {'):]
+        frame = frame[:frame.index('\n}\n')]
+        self.assertNotIn('highlighted(', frame)
+        callers = [m.start() for m in re.finditer(r'[^_\w]highlighted\(', studio)]
+        opener = studio.index('\nbool open_from_library(bool shift) {')
+        self.assertTrue(callers and all(opener < c < studio.index('\nvoid leave() {') for c in callers))
+
     def test_assumptions_listed_once(self):
         text = STUDIO.read_text()
         for n in range(1, 25):
