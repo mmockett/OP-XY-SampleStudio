@@ -4207,7 +4207,8 @@ bool frame(i32 elapsed) {
     if (studio.mode == kOpen && host::selected_track() != studio.track && !bounce.on) {
         // another track selected under the studio: it closes (the edit kept for later), so the
         // old track sounds again and the new one isn't held
-        log(__LINE__, "track changed under the studio: closed");
+        log(__LINE__, "track changed under the studio (%d, now %d): closed", static_cast<int>(studio.track),
+            static_cast<int>(host::selected_track()));
         close_studio(true);
         return false;
     }
