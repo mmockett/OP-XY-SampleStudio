@@ -9,9 +9,8 @@ result as a new file beside the original, as slices, or as a new drum kit.
 It is a firmware extension for the teenage engineering OP-XY, built with the
 community [Open-XY SDK](https://github.com/etcetc000/open-xy).
 
-**Status: experimental.** Played on an OP-XY running OS 1.2.1. CPU measured on
-the device. Needs an SDK build with Sample Studio in it: see
-[Installing](#installing).
+Played on an OP-XY running OS 1.2.1, with its CPU measured on the device. Needs
+an SDK build with Sample Studio in it: see [Installing](#installing).
 
 ## Opening it
 
