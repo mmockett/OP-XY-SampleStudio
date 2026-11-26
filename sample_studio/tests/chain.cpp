@@ -193,6 +193,38 @@ void a_note_transposes_in_the_tape_stage() {
     CHECK(frames_over(source, transpose_q16(1200)) == source / 2);
 }
 
+// A file's own root (editor.cpp A49): the first well-formed 'smpl' chunk, read through the chunks.
+struct MemoryReader {
+    const unsigned char* data;
+    u32 size, at;
+    u32 operator()(void* to, u32 n) {
+        const u32 k = at + n <= size ? n : size - at;
+        std::memcpy(to, data + at, k);
+        at += k;
+        return k;
+    }
+};
+void a_files_root_comes_from_its_smpl_chunk() {
+    using namespace opxy::sample_bake;
+    unsigned char f[200] = {}, scratch[64];
+    std::memcpy(f, "RIFF\0\0\0\0WAVEdata", 16);
+    put32(f + 16, 5);                       // an odd chunk: padded to 6
+    std::memcpy(f + 26, "smpl", 4);
+    put32(f + 30, 36);
+    put32(f + 34 + 12, 36);                 // unity C2
+    put32(f + 34 + 16, 0x40000000u);        // a quarter semitone above
+    MemoryReader r = {f, 70, 0};
+    i32 cents = 0;
+    CHECK(wav_root_cents(r, cents, 1u << 20, scratch, sizeof scratch) && cents == 3625);
+    MemoryReader capped = {f, 70, 0};
+    CHECK(!wav_root_cents(capped, cents, 30, scratch, sizeof scratch));   // the limit reached first
+    put32(f + 34 + 12, 128);                // past MIDI's notes: no root
+    MemoryReader bad = {f, 70, 0};
+    CHECK(!wav_root_cents(bad, cents, 1u << 20, scratch, sizeof scratch));
+    MemoryReader none = {f, 26, 0};          // the file ends before any smpl
+    CHECK(!wav_root_cents(none, cents, 1u << 20, scratch, sizeof scratch));
+}
+
 void a_save_normalises_and_names_itself() {
     using namespace opxy::sample_bake;
     CHECK(normalise_gain(0, kTarget) == kUnity);                   // silence: no gain
@@ -238,6 +270,7 @@ int main() {
     beat_sets_the_length_and_the_pitch_apart();
     the_block_form_makes_the_same_words();
     a_note_transposes_in_the_tape_stage();
+    a_files_root_comes_from_its_smpl_chunk();
     a_save_normalises_and_names_itself();
     std::printf("Sample Studio chain: all checks passed\n");
     return 0;

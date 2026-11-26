@@ -495,6 +495,93 @@ void pitch_checks() {
     busy = 0;
     std::printf("notes at the track's pitch (checked)\n");
 }
+
+// A49: a file on no key plays from its own root, read from its 'smpl' chunk when it opens.
+u32 wav_size;
+unsigned char wav[4096];
+void wav_begin() {
+    std::memcpy(wav, "RIFF\0\0\0\0WAVE", 12);
+    wav_size = 12;
+}
+void wav_chunk(const char* id, const unsigned char* data, u32 size, u32 declared) {
+    std::memcpy(wav + wav_size, id, 4);
+    put32(wav + wav_size + 4, declared);
+    std::memcpy(wav + wav_size + 8, data, size);
+    wav_size += 8 + size + (size & 1u);
+}
+void smpl_chunk(u32 unity, u32 fraction, u32 size = 36) {
+    unsigned char d[36] = {};
+    put32(d + 8, 45351);   // the sample period of 22050 Hz
+    put32(d + 12, unity);
+    put32(d + 16, fraction);
+    wav_chunk("smpl", d, size, size);
+}
+i32 root_heard(u32 note) {
+    harness::file = wav;
+    harness::file_size = wav_size;
+    harness::run_jobs = true;
+    close_studio(false);
+    EXPECT(open_file(5, "/fat32/samples/user/c2.wav"));
+    harness::run_jobs = false;
+    studio.ready = true;
+    studio.edit.start = 0;
+    studio.edit.end = kLoop;
+    studio.opened = studio.edit;
+    return note_cents_heard(note);
+}
+void root_checks() {
+    harness::drum = false;
+    harness::engine = 0;   // a synth track: file mode
+    const unsigned char fmt[16] = {1, 0, 2, 0, 0x22, 0x56, 0, 0, 0x88, 0x58, 1, 0, 4, 0, 16, 0};   // 22050 Hz, 2 ch
+    const unsigned char pcm[6] = {};
+    // ensemble/c2.wav's shape: fmt, data, then smpl unity 36: its own pitch at C2, two octaves up at C4
+    wav_begin();
+    wav_chunk("fmt ", fmt, 16, 16);
+    wav_chunk("data", pcm, 6, 6);
+    smpl_chunk(36, 0);
+    EXPECT(root_heard(36) == 0 && studio.file_root == 3600);
+    EXPECT(root_heard(60) == 2400);
+    // a root of 33: middle C would be +27 semitones, past stock's two octaves: clamped to +24
+    wav_begin();
+    smpl_chunk(33, 0);
+    EXPECT(root_heard(60) == 2400 && root_heard(45) == 1200);
+    // a pitch fraction: half a semitone above unity 45
+    wav_begin();
+    smpl_chunk(45, 0x80000000u);
+    EXPECT(root_heard(45) == -50 && studio.file_root == 4550);
+    // no smpl chunk: middle C
+    wav_begin();
+    wav_chunk("fmt ", fmt, 16, 16);
+    wav_chunk("data", pcm, 6, 6);
+    EXPECT(root_heard(60) == 0 && studio.file_root == 6000);
+    // malformed: a short smpl, a unity note past 127, an odd chunk's pad byte, a size past the file's end
+    wav_begin();
+    smpl_chunk(36, 0, 12);
+    EXPECT(root_heard(60) == 0);
+    wav_begin();
+    smpl_chunk(200, 0);
+    EXPECT(root_heard(60) == 0);
+    wav_begin();
+    const unsigned char odd[3] = {1, 2, 3};
+    wav_chunk("LIST", odd, 3, 3);   // padded to 4
+    smpl_chunk(48, 0);
+    EXPECT(root_heard(60) == 1200);
+    wav_begin();
+    wav_chunk("data", pcm, 6, 0x7ffffff0u);
+    EXPECT(root_heard(60) == 0);
+    // several smpl chunks: the first well-formed one
+    wav_begin();
+    smpl_chunk(200, 0);
+    smpl_chunk(48, 0);
+    smpl_chunk(36, 0);
+    EXPECT(root_heard(60) == 1200);
+    // not a WAVE at all
+    std::memcpy(wav, "RIFX", 4);
+    EXPECT(root_heard(60) == 0);
+    harness::file = nullptr;
+    harness::engine = opxy::studio::engine_sampler;
+    std::printf("a file's own root (checked)\n");
+}
 }}}}}  // namespace opxy::extensions::sample_studio::edit::scenes
 
 int main(int argc, char** argv) {
@@ -504,5 +591,6 @@ int main(int argc, char** argv) {
     opxy::extensions::sample_studio::edit::scenes::earlier_checks();
     opxy::extensions::sample_studio::edit::scenes::leave_checks();
     opxy::extensions::sample_studio::edit::scenes::pitch_checks();
+    opxy::extensions::sample_studio::edit::scenes::root_checks();
     return 0;
 }

@@ -133,6 +133,48 @@ inline i32 mono_word(i32 l, i32 r) { return (l >> 1) + (r >> 1) + (l & r & 1); }
 
 inline void put16(unsigned char* p, u32 v) { p[0] = v & 0xff; p[1] = (v >> 8) & 0xff; }
 inline void put32(unsigned char* p, u32 v) { put16(p, v & 0xffff); put16(p + 2, v >> 16); }
+inline u32 get32(const unsigned char* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (static_cast<u32>(p[3]) << 24); }
+inline bool same4(const unsigned char* p, const char* tag) {
+    return p[0] == static_cast<unsigned char>(tag[0]) && p[1] == static_cast<unsigned char>(tag[1]) &&
+           p[2] == static_cast<unsigned char>(tag[2]) && p[3] == static_cast<unsigned char>(tag[3]);
+}
+// A file's own root (editor.cpp A49): the first well-formed 'smpl' chunk's MIDI unity note (0..127,
+// 60 = C4) and pitch fraction (a fraction of a semitone above it), as cents from note 0. Chunks are
+// walked in order, each skipped by its size and its pad byte when odd, reading through them (the
+// card has no seek here), at most `limit` bytes in all. False for no RIFF/WAVE, no such chunk, a short
+// or out-of-range one only, or the limit reached. `read(to, n)` returns the bytes it read.
+template <class Read>
+bool wav_root_cents(Read& read, i32& cents, u32 limit, unsigned char* scratch, u32 scratch_size) {
+    unsigned char h[12];
+    if (scratch_size < 20 || read(h, 12) != 12 || !same4(h, "RIFF") || !same4(h + 8, "WAVE")) return false;
+    u32 used = 12;
+    unsigned char c[8];
+    while (used + 8 <= limit && read(c, 8) == 8) {
+        used += 8;
+        const u32 size = get32(c + 4);
+        u32 left = size + (size & 1u);
+        if (left < size) return false;   // a size that wraps
+        if (same4(c, "smpl") && size >= 20) {
+            if (read(scratch, 20) != 20) return false;
+            used += 20;
+            left -= 20;
+            const u32 unity = get32(scratch + 12), fraction = get32(scratch + 16);
+            if (unity <= 127) {
+                cents = static_cast<i32>(unity * 100u + (((fraction >> 16) * 100u) >> 16));
+                return true;
+            }
+        }
+        while (left) {
+            if (used >= limit) return false;
+            const u32 n = left < scratch_size ? left : scratch_size;
+            if (read(scratch, n) != n) return false;
+            left -= n;
+            used += n;
+        }
+    }
+    return false;
+}
+
 // A 44-byte header for 16-bit PCM at the sample's own rate and channels.
 inline void wav_header(unsigned char* h, u32 frames, u32 channels, u32 rate) {
     const u32 block = 2 * channels;

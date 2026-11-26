@@ -1,5 +1,6 @@
 // The harness's stand-in for the SDK's Sample Studio services (opxy/sample_studio.hpp): enough for
 // the editor to draw a frame on Linux. Nothing here touches a file, the audio board or stock.
+#include <cstring>
 #include <opxy/sample_studio.hpp>
 
 namespace harness {
@@ -23,6 +24,9 @@ opxy::u32 relists, rescans;                              // the library listed a
 bool off_top;                                            // another browser (presets) on the shared screen
 bool drum;                                               // the track is a drum sampler, Drumline or a synthesis kit
 opxy::u32 held_note = 128;                               // the note held on the track (128: none)
+bool run_jobs;                                           // post() runs the job and its done at once
+const unsigned char* file;                               // the one file on the card, in memory
+opxy::u32 file_size, file_at;
 }
 
 namespace opxy { namespace studio {
@@ -32,9 +36,23 @@ u32 cycles() { return 0; }
 void barrier() {}
 void log(u32, const char*, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {}
 void log_audio(u32, const char*, i32, i32, i32, i32, i32, i32) {}
-void post(void (*)(u32), void (*)(u32), u32) {}
-File* file_open(const char*, const char*) { return nullptr; }
-u32 file_read(void*, u32, u32, File*) { return 0; }
+void post(void (*job)(u32), void (*done)(u32), u32 arg) {
+    if (!harness::run_jobs) return;
+    if (job) job(arg);
+    if (done) done(arg);
+}
+File* file_open(const char*, const char* mode) {
+    if (!harness::file || mode[0] != 'r') return nullptr;
+    harness::file_at = 0;
+    return const_cast<unsigned char*>(harness::file);
+}
+u32 file_read(void* to, u32 size, u32 count, File* file) {
+    if (file != harness::file || size != 1) return 0;
+    const u32 n = harness::file_at + count <= harness::file_size ? count : harness::file_size - harness::file_at;
+    std::memcpy(to, harness::file + harness::file_at, n);
+    harness::file_at += n;
+    return n;
+}
 u32 file_write(const void*, u32, u32, File*) { return 0; }
 void file_close(File*) {}
 bool rename_file(const char*, const char*) { return false; }

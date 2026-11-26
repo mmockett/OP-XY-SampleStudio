@@ -585,6 +585,7 @@ struct Studio {
     opxy::SampleView view;
     bool loading, ready, pcm_failed;
     bool file_only;                    // A28: a file from the browser, on no key
+    i32 file_root;                     // A49: its own root in cents from note 0 (6000: middle C, none in the file)
     bool on_key;                       // A31: a file from the browser, for the selected key (drum, multi)
     unsigned char key_entry[kEntryBytes];  // A31: that key's entry as the studio opened
     u32 retry_ms;
@@ -1768,6 +1769,39 @@ void begin_studio(u32 track, bool file) {
 // A28: open the browser's highlighted file on a track without a sample key. A31: or for the
 // selected key of a drum sampler or multisampler (engine, slot), where the library highlights a file
 // without putting it on the key: the keys play it, save puts it on the key, slices can go on the kit.
+// A49 A file on no key plays from its own root: the 'smpl' chunk's unity note and pitch fraction
+//    (stock's instrument samples carry one: ensemble/c2.wav 36, harmonium/a2.wav 45), else middle C.
+//    Read on the worker when the file opens, through its chunks (no seek), at most kRootScanBytes;
+//    notes struck before it lands play from middle C.
+const u32 kRootScanBytes = 16u << 20;
+char root_path[kPathBytes];
+u32 root_serial, root_job_serial;
+bool root_found;
+i32 root_cents;
+unsigned char root_scratch[4096];
+struct FileReader {
+    File* file;
+    u32 operator()(void* to, u32 n) { return file_read(to, 1, n, file); }
+};
+void root_job(u32 serial) {
+    root_found = false;
+    root_cents = 6000;
+    if (File* f = file_open(root_path, "rb")) {
+        FileReader read = {f};
+        root_found = wav_root_cents(read, root_cents, kRootScanBytes, root_scratch, sizeof root_scratch);
+        file_close(f);
+    }
+    root_job_serial = serial;
+}
+void root_done(u32 serial) {
+    if (serial != root_serial || root_job_serial != serial || !studio.file_only || studio.on_key) return;
+    studio.file_root = root_found ? root_cents : 6000;
+    if (root_found)
+        log(__LINE__, "open: the file's root, smpl unity %d (+%d cents): notes play from it", root_cents / 100,
+            root_cents % 100);
+    else
+        log(__LINE__, "open: no root in the file: notes play from middle C (60)");
+}
 bool open_file(u32 track, const char* path, u32 engine = 0, u32 slot = 0) {
     if (starts_with(path, kScratchFolder)) { popup("a preview file: open the original"); return false; }
     host::stop_audition();   // stop stock's audition of it (as stock does on leaving the list)
@@ -1784,12 +1818,17 @@ bool open_file(u32 track, const char* path, u32 engine = 0, u32 slot = 0) {
     studio.edit = edit_from(studio.origin);   // markers set once the PCM is in (open_done)
     studio.opened = studio.edit;
     pending.valid = false;
+    studio.file_root = 6000;
     if (studio.on_key)
         log(__LINE__, "open %s: the highlighted file for track %d key %d", studio.path, static_cast<int>(track),
             static_cast<int>(slot));
     else
         log(__LINE__, "open %s: file mode on track %d (no key)", studio.path, static_cast<int>(track));
     begin_studio(track, true);
+    if (!studio.on_key) {
+        copy_text(root_path, path, sizeof root_path);
+        host::post(root_job, root_done, ++root_serial);   // A49: once the studio is open on it
+    }
     return true;
 }
 bool dirty() { return !same_edit(studio.edit, studio.opened); }
@@ -3648,15 +3687,19 @@ u32 note_struck(u32 t) {
 // A48 A note plays the edit as the track would play it: on a sampler or multisampler, transposed
 //    by the note against the key's root and fine (on a multisampler, the edited zone's key for every
 //    note), within stock's two octaves either way; a drum track's pads (drum sampler, Drumline, a
-//    synthesis kit) and the slice page's pads at their own pitch; a file on no key from middle C (60).
+//    synthesis kit) and the slice page's pads at their own pitch; a file on no key from its own root (A49).
 //    Audition only: the play button, prints and saves stay at the file's own pitch (player.cpp P16).
 i32 note_cents(u32 note) {
     if (note >= 128 || studio.track >= 8 || host::drum_track(studio.track)) return 0;
     const unsigned char* key = studio.on_key ? studio.key_entry : studio.file_only ? nullptr : studio.origin;
-    u32 root = key ? host::entry_root(key) : 60;
-    const i32 fine = key ? host::entry_fine(key) : 0;
-    if (!root && !fine) root = 60;   // A34: an empty key's 0, 0 is neutral
-    i32 cents = (static_cast<i32>(note) - static_cast<i32>(root)) * 100 + fine;
+    i32 root_cents = studio.file_root;   // A49: a file on no key, from its own root
+    if (key) {
+        u32 root = host::entry_root(key);
+        const i32 fine = host::entry_fine(key);
+        if (!root && !fine) root = 60;   // A34: an empty key's 0, 0 is neutral
+        root_cents = static_cast<i32>(root) * 100 - fine;
+    }
+    i32 cents = static_cast<i32>(note) * 100 - root_cents;
     if (cents > dsp::kMaxTransposeCents) cents = dsp::kMaxTransposeCents;
     if (cents < -dsp::kMaxTransposeCents) cents = -dsp::kMaxTransposeCents;
     return cents;
