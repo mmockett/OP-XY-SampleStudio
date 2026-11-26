@@ -1993,7 +1993,7 @@ void load_kit() {
         found[k] = region_entry(render.track, 53 + k);
         if (found[k] && (!base || found[k] < base)) base = found[k];
     }
-    bool laid_out = base != nullptr;
+    bool laid_out = true;   // a kit with no region yet is all fresh pads (below)
     for (u32 k = 0; k < 24; ++k) note_of[k] = 0;
     // A42 (e.g. a kit New kit made, 8 pads): a kit with fewer pads than keys gives
     // some keys no entry or another key's; a pad is the first key whose entry is that place, the rest are files
@@ -2007,8 +2007,29 @@ void load_kit() {
             ++pads;
         }
     }
+    // A fresh kit (stock's new kit sets up only the pads it has loaded): a key with no region at all
+    // is a pad of its own, given its slice as stock's library gives a sample to an empty pad. A key
+    // that shares another key's region stays out: a file put there would replace that pad's too.
+    bool fresh_pad[24];
+    u32 lacking = 0, sharing = 0;
+    for (u32 k = 0; k < 24; ++k) fresh_pad[k] = false;
+    for (u32 k = 0; k < 24 && laid_out; ++k) {
+        if (found[k]) {
+            if (note_of[static_cast<u32>(found[k] - base) / kEntryBytes] != 53 + k) ++sharing;
+            continue;
+        }
+        ++lacking;
+        if (!note_of[k]) {
+            note_of[k] = 53 + k;
+            fresh_pad[k] = true;
+        }
+    }
+    if (lacking || sharing)
+        log(__LINE__, "kit: %d keys without a region (pads of their own now), %d sharing another's", static_cast<int>(lacking),
+            static_cast<int>(sharing));
     unsigned char* selected_entry = region_entry(render.track, render.slot);
-    const u32 first = laid_out && selected_entry && selected_entry >= base ? static_cast<u32>(selected_entry - base) / kEntryBytes : 24;
+    u32 first = laid_out && selected_entry && selected_entry >= base ? static_cast<u32>(selected_entry - base) / kEntryBytes : 24;
+    if (!selected_entry && render.slot >= 53 && render.slot < 77 && fresh_pad[render.slot - 53]) first = render.slot - 53;   // an empty pad selected
     if (first >= 24 || !note_of[first]) {
         log(__LINE__, "kit: its keys aren't laid out as expected: the slices stay files");
         set_card("slices saved as files", "kit keys not found", 3000);
@@ -2027,9 +2048,23 @@ void load_kit() {
         kit_undo.notes[k] = note_of[first + k];
         unsigned char* entry = region_entry(render.track, note_of[first + k]);
         if (entry) copy_bytes(kit_undo.entries[k], entry, kEntryBytes);
+        else for (u32 i = 0; i < kEntryBytes; ++i) kit_undo.entries[k][i] = 0;   // undo leaves an empty pad
         if (k == 0) copy_bytes(kit_undo.entries[0], studio.on_key ? studio.key_entry : studio.origin, kEntryBytes);
-        assign_file(render.track, kDrumSampler, note_of[first + k], render.slice_paths[k],
-                    key_frames(render.slice_frames[k]), 60);
+        const bool placed_ok = assign_file(render.track, kDrumSampler, note_of[first + k], render.slice_paths[k],
+                                           key_frames(render.slice_frames[k]), 60);
+        if (fresh_pad[first + k]) {
+            // a pad of its own now, or the rest stay files
+            unsigned char* made = region_entry(render.track, note_of[first + k]);
+            bool own = placed_ok && made;
+            for (u32 j = 0; own && j < k; ++j) own = made != region_entry(render.track, note_of[first + j]);
+            if (!own) {
+                log(__LINE__, "kit: key %d took no region of its own: slices %d up stay files",
+                    static_cast<int>(note_of[first + k]), static_cast<int>(k + 1));
+                count = k;
+                kit_undo.count = placed_ok ? k + 1 : k;   // whatever the file changed, undo puts back
+                break;
+            }
+        }
         // A34 (else slices on the kit play two octaves up): the drum
         // sampler's assignment leaves the key's root and fine as they were; a slice is at its own pitch
         // on root 60, fine 0, as stock's kits (zebra.json: pitch.keycenter 60, tune 0)

@@ -262,10 +262,38 @@ void file_mode_checks() {
     EXPECT(harness::sent[7] == 0);   // the track sounds again
     std::printf("file mode (checked)\n");
 }
+
+// "This kit" onto a fresh kit: stock's new kit sets up only the pads it has loaded (here pad 1), and
+// every slice still gets a pad of its own; onto a full kit, the same pads as before.
+void kit_checks() {
+    for (u32 full = 0; full < 2; ++full) {
+        std::memset(harness::kit, 0, sizeof harness::kit);
+        std::memset(harness::put, 0, sizeof harness::put);
+        for (u32 k = 0; k < 24; ++k) harness::has[k] = full || k == 0;
+        render.new_kit = false;
+        render.engine = kDrumSampler;
+        render.track = 3;
+        render.slot = 53;
+        render.cut_count = 8;
+        for (u32 k = 0; k < render.cut_count; ++k) {
+            std::snprintf(render.slice_paths[k], sizeof render.slice_paths[k], "/fat32/samples/user/break-s%u.wav",
+                          static_cast<unsigned>(k + 1));
+            render.slice_frames[k] = 1000 * (k + 1);
+        }
+        slices_to_kit = true;
+        studio.on_key = true;
+        load_kit();
+        for (u32 k = 0; k < 24; ++k) EXPECT(harness::put[k] == (k < 8 ? 1u : 0u));
+        for (u32 k = 0; k < 8; ++k) EXPECT(!std::strcmp(host::entry_path(harness::kit[k]), render.slice_paths[k]));
+        EXPECT(kit_undo.valid && kit_undo.count == 8);
+    }
+    std::printf("this kit on a fresh kit (checked)\n");
+}
 }}}}}  // namespace opxy::extensions::sample_studio::edit::scenes
 
 int main(int argc, char** argv) {
     opxy::extensions::sample_studio::edit::scenes::draw_all(argc > 1 ? argv[1] : ".");
     opxy::extensions::sample_studio::edit::scenes::file_mode_checks();
+    opxy::extensions::sample_studio::edit::scenes::kit_checks();
     return 0;
 }

@@ -11,6 +11,11 @@ bool highlight_seen;                                     // stock's record of th
 opxy::u32 notes;                                         // the track's note serial
 opxy::i32 sent[15];                                      // the last value sent on each channel
 bool sent_on[15];
+// A drum kit's region entries by place, keys 53..76: an entry exists where `has` says so, and
+// put_file makes one on an empty key as stock's library does for an empty pad.
+unsigned char kit[24][opxy::studio::entry_bytes];
+bool has[24];
+opxy::u32 put[24];                                       // put_file calls per key
 }
 
 namespace opxy { namespace studio {
@@ -53,8 +58,10 @@ void relist_library() {}
 void rescan_presets() {}
 u32 note_serial(u32) { return harness::notes; }
 bool note_held(u32, u32) { return false; }
-unsigned char* key_entry(u32, u32) { return nullptr; }
-const char* entry_path(const unsigned char*) { return ""; }
+unsigned char* key_entry(u32, u32 key) {
+    return key >= 53 && key < 77 && harness::has[key - 53] ? harness::kit[key - 53] : nullptr;
+}
+const char* entry_path(const unsigned char* entry) { return reinterpret_cast<const char*>(entry + 0x20); }
 i32 entry_frames(const unsigned char*) { return 0; }
 SampleRegion entry_region(const unsigned char*) { return SampleRegion(); }
 i32 entry_level(const unsigned char*) { return 0; }
@@ -63,7 +70,16 @@ u32 entry_root(const unsigned char*) { return 60; }
 i32 entry_fine(const unsigned char*) { return 0; }
 void set_entry_tuning(unsigned char*, u32, i32) {}
 void set_entry_whole(unsigned char*, u32) {}
-bool put_file(u32, u32, u32, const char*, u32, u32) { return false; }
+bool put_file(u32, u32, u32 key, const char* path, u32, u32) {
+    if (key < 53 || key >= 77) return false;
+    harness::has[key - 53] = true;
+    ++harness::put[key - 53];
+    char* name = reinterpret_cast<char*>(harness::kit[key - 53] + 0x20);
+    u32 n = 0;
+    for (; path[n] && n + 1 < path_bytes; ++n) name[n] = path[n];
+    name[n] = 0;
+    return true;
+}
 void send_regions(u32, bool) {}
 void samples_changed() {}
 bool samples_gathered() { return true; }
