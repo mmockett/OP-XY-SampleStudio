@@ -328,12 +328,22 @@ void earlier_checks() {
         slice_source(studio.edit, k, a, b);
         EXPECT(a < b && b <= studio.edit.end);
     }
-    // A save lists itself in the library, and a new kit in the preset index, once the studio closes.
-    harness::relists = harness::rescans = 0;
-    library_stale = presets_stale = true;
+    // A save lists itself in the library once the studio closes.
+    harness::relists = 0;
+    library_stale = true;
     studio.mode = kOpen;
     close_studio(false);
-    EXPECT(harness::relists == 1 && harness::rescans == 1);
+    EXPECT(harness::relists == 1);
+    // A new kit is in stock's preset index as soon as it is written, with the studio still open: once
+    // the library leaves the screen the studio sees no frame, so it can't wait for a close.
+    open_scene(kChop);
+    harness::rescans = 0;
+    render.new_kit = true;
+    render.cut_count = 8;
+    copy_text(render.kit_folder, "/fat32/presets/snapshot/break.preset", sizeof render.kit_folder);
+    load_kit();
+    EXPECT(studio.mode == kOpen && harness::rescans == 1);
+    render.new_kit = false;
     std::printf("earlier device faults (checked)\n");
 }
 }}}}}  // namespace opxy::extensions::sample_studio::edit::scenes

@@ -1608,19 +1608,18 @@ class PresetIndex(unittest.TestCase):
 
     def test_new_kit_builds_stocks_preset_index_again(self):
         body = self.body('void rescan_presets() {')
-        self.assertIn('presets_stale = false;', body)
         self.assertIn('host::rescan_presets();', body)
         self.assertIn('stock<void(u32)>(0x8d4eefec)(0);', HOST.read_text())   # 0, as rename and delete pass; boot passes 1
+        # as soon as the kit is written, not on close: once the library leaves the screen the studio
+        # sees no frame, so the preset browser could open before any close
         kit = self.body('void load_kit() {')
-        self.assertIn('presets_stale = true;', kit)
-        self.assertIn('if (studio_closed()) rescan_presets();', kit)
-        self.assertLess(kit.index('set_card("new kit saved"'), kit.index('presets_stale = true;'))
-        close = self.body('void close_studio(bool keep) {')
-        self.assertIn('if (presets_stale) rescan_presets();', close)
+        self.assertLess(kit.index('set_card("new kit saved"'), kit.index('rescan_presets();'))
+        self.assertNotIn('studio_closed()) rescan_presets', kit)
+        self.assertNotIn('presets_stale', STUDIO.read_text())
 
     def test_only_a_new_kit_rescans(self):
         text = STUDIO.read_text()
-        self.assertEqual(text.count('presets_stale = true;'), 1)
+        self.assertEqual(len(re.findall(r'[^:]rescan_presets\(\);', text)), 1)   # load_kit's call
         self.assertEqual(text.count('host::rescan_presets();'), 1)
         self.assertEqual(HOST.read_text().count('0x8d4eefec'), 1)
 

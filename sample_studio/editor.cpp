@@ -376,11 +376,9 @@ void relist_library() {
 // A37 (a new kit in presets > snapshot): stock's preset browser reads an index of every
 // preset that stock builds at boot ("scan presets": 8d4eefec(1), 8c0b8d30), not the folder, and the library's
 // listing (A35) is apart from it. Stock's own preset rename and delete build it again with 8d4eefec(0) on the UI
-// thread (8d4ef74c, 8d4ef670); the studio does the same once a new kit is written, on closing. It reads the card:
+// thread (8d4ef74c, 8d4ef670); the studio does the same as soon as a new kit is written. It reads the card:
 // about 1.4 s at boot, so the screen holds that long, once, after a new kit.
-bool presets_stale = false;
 void rescan_presets() {
-    presets_stale = false;
     const u32 t0 = now_ms();
     host::rescan_presets();
     log(__LINE__, "presets: stock's preset list built again for the new kit, %d ms", static_cast<int>(now_ms() - t0));
@@ -1810,7 +1808,6 @@ void close_studio(bool keep) {
     drop_pcm();
     if (!busy) queue_sweep(studio.track);   // else after_render sweeps once the render ends
     if (library_stale) relist_library();   // A35: the saves are on the card; a preview render doesn't matter
-    if (presets_stale) rescan_presets();   // A37
     log(__LINE__, "closed%s", pending.valid ? ", edit kept for later" : "");
     studio.mode = kClosed;
     studio.compare = false;
@@ -1970,8 +1967,10 @@ void load_kit() {
         log(__LINE__, "kit: %d slices as a new kit in %s (keys %d up)", static_cast<int>(render.cut_count),
             render.kit_folder, static_cast<int>(kKitFirstKey));
         set_card("new kit saved", base_name(render.kit_folder), 4000);
-        presets_stale = true;   // A37: stock's preset list learns of it when the studio closes
-        if (studio_closed()) rescan_presets();
+        // A37: stock's preset index learns of it now, not when the studio closes: the studio no longer
+        // sees the browser screen once the library leaves it (the SDK hands it the library's frames
+        // only), so a close can come after the preset browser has already opened without the kit.
+        rescan_presets();
         return;
     }
     if (render.engine != kDrumSampler || !slices_to_kit) {
