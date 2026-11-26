@@ -2,7 +2,7 @@
   "id": "sample_studio",
   "name": "Sample Studio",
   "description": "In the sample library, press edit: trim, slice, retime and colour a sample, hear it live on the keys, then save it.",
-  "note": "Needs a sampler or drum track. Not with a master processor.",
+  "note": "The build needs a sample engine or Drumline page 2. Not with a master processor.",
   "claims": [],
   "actions": [],
   "sample_studio": {}

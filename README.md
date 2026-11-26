@@ -20,9 +20,12 @@ Press Shift + Sample to open the library and highlight a sample.
 - On a sampler track, press M1 (`edit`).
 - On a drum sampler or multisampler track, hold Shift: `edit` appears over M1.
   Shift + M1 opens the highlighted sample for the selected key.
-- On any other track, M1 opens the highlighted file.
+- On any other track, M1 opens the highlighted file. With a folder highlighted,
+  it asks for a sample.
 
-Sample closes the studio. With an unsaved edit, a card asks first.
+Sample closes the studio. With an unsaved edit, a card asks first. Leaving the
+library another way, to the preset browser say, closes the studio too and
+keeps the edit for when you open the same sample again.
 
 ## Pages
 
@@ -33,8 +36,11 @@ original), play (the edit) and save.
 While the studio is open, the track's keys and the sequencer play the edit at
 the key's own level and the pitch the track would play it: on a sampler or
 multisampler a key above the sample's root plays higher, and a drum track's
-pads keep their own pitch. Notes stop when you let go. Every change is heard at once,
-except beat-mode retime, which renders first and plays what's ready as it goes.
+pads keep their own pitch. A file opened on a track with no sample of its own
+plays from the root note the file carries (stock's instrument samples have one),
+or from middle C. The track's keyboard octave counts too, as it does for the
+synth. Notes stop when you let go. Every change is heard at once, except
+beat-mode retime, which renders first and plays what's ready as it goes.
 
 ### Trim
 
@@ -92,8 +98,9 @@ Shift + M4 saves. The original is never changed.
   first 20 seconds, as stock does.
 - **Save slices**, on the slice page, writes one file per slice. A card offers
   where they go: files only, a new drum kit preset in `presets/snapshot` (its
-  slices on the keys from the first up), or, on a drum track, this kit's keys from the
-  selected one up.
+  slices on the keys from the first up), or, on a drum track, this kit's pads from
+  the selected one up. A fresh kit's empty pads take slices too, and undo
+  empties them again.
 - **With fx i or fx ii above 0**, the save records the edit through the real
   effects in real time, with `tail` seconds after it. `full` records until the
   effects have died away (under -60 dB for 2 seconds), at most 30 seconds; if
@@ -102,8 +109,8 @@ Shift + M4 saves. The original is never changed.
   last carries the tail. Stop the sequencer first: other tracks feed the same
   effects. A beat-mode retime records through its finished render, up to 20
   seconds long; a longer one saves dry.
-- New files and kits show in the library and the preset browser as soon as the
-  studio closes.
+- A new kit shows in the preset browser at once; new files show in the library
+  as soon as the studio closes.
 
 ## Limits
 
