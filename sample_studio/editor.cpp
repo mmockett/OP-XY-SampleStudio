@@ -3287,13 +3287,15 @@ struct Play {
     bool live_slice;
     bool live_preview;          // A32: the live chain over the retime preview (mode 4)
     i32 level;
+    i32 cents;                 // A48: the play's transposition (a note's against the key's root)
 } play;
+i32 next_cents;   // A48: the transposition the next play takes: a note's, 0 for any other play (a print's too)
 void b3(u32 id, i32 value) { host::send(id - 138, value); }   // IDs 138..152: the player's channels 0..14
 void player_send() {
     const u32 flags = (play.on ? 1u : 0u) | (play.reverse ? 4u : 0u) | (play.release ? 8u : 0u) |
                       (play.growing ? 16u : 0u);
     b3(138, static_cast<i32>((play.serial << 8) | flags));
-    b3(139, static_cast<i32>(play.mode | (studio.track << 8)));
+    b3(139, static_cast<i32>(play.mode | (studio.track << 8) | ((static_cast<u32>(play.cents) & 0xffffu) << 16)));
     b3(140, static_cast<i32>(play.which));
     b3(141, static_cast<i32>(play.start));
     b3(142, static_cast<i32>(play.end));
@@ -3325,7 +3327,8 @@ void play_file(const char* path, u32 start, u32 end, bool reverse, i32 level, bo
     play.end = end;
     play.reverse = original && reverse;   // a render is already in playing order
     play.level = level;
-    play.rate = studio.view.rate ? studio.view.rate : 44100;
+    play.cents = next_cents;   // A48: the playhead moves at the transposed rate
+    play.rate = dsp::mul_q16(studio.view.rate ? studio.view.rate : 44100, dsp::transpose_q16(play.cents));
     play.t0 = now_ms();
     play.live_change = live_rev;
     send_sends();                                      // A25
@@ -3488,7 +3491,8 @@ void play_live(u32 a, u32 b, bool slice, u32 offset) {
     play.end = tape_frames(b - a, studio.edit.stretch);
     play.reverse = false;   // the chain reverses
     play.level = 0;
-    play.rate = studio.view.rate ? studio.view.rate : 44100;
+    play.cents = next_cents;   // A48: the playhead moves at the transposed rate
+    play.rate = dsp::mul_q16(studio.view.rate ? studio.view.rate : 44100, dsp::transpose_q16(play.cents));
     play.t0 = now_ms();
     player_send();
     static u32 logged_ms;
@@ -3521,7 +3525,8 @@ void play_live_preview(u32 a, u32 b, bool slice) {
     play.end = b - a;
     play.reverse = false;
     play.level = 0;
-    play.rate = studio.view.rate ? studio.view.rate : 44100;
+    play.cents = next_cents;   // A48: the playhead moves at the transposed rate
+    play.rate = dsp::mul_q16(studio.view.rate ? studio.view.rate : 44100, dsp::transpose_q16(play.cents));
     play.t0 = now_ms();
     send_sends();
     if (studio.shown_segmented) send_grow(play.which, studio.preview_frames);   // A23: its count, as play_file
@@ -3638,6 +3643,22 @@ u32 note_struck(u32 t) {
     }
     return t - struck_ms <= kTapMs ? struck_note : 128;
 }
+// A48 A note plays the edit as the track would play it: on a sampler or multisampler, transposed
+//    by the note against the key's root and fine (on a multisampler, the edited zone's key for every
+//    note), within stock's two octaves either way; a drum track's pads (drum sampler, Drumline, a
+//    synthesis kit) and the slice page's pads at their own pitch; a file on no key from middle C (60).
+//    Audition only: the play button, prints and saves stay at the file's own pitch (player.cpp P16).
+i32 note_cents(u32 note) {
+    if (note >= 128 || studio.track >= 8 || host::drum_track(studio.track)) return 0;
+    const unsigned char* key = studio.on_key ? studio.key_entry : studio.file_only ? nullptr : studio.origin;
+    u32 root = key ? host::entry_root(key) : 60;
+    const i32 fine = key ? host::entry_fine(key) : 0;
+    if (!root && !fine) root = 60;   // A34: an empty key's 0, 0 is neutral
+    i32 cents = (static_cast<i32>(note) - static_cast<i32>(root)) * 100 + fine;
+    if (cents > dsp::kMaxTransposeCents) cents = dsp::kMaxTransposeCents;
+    if (cents < -dsp::kMaxTransposeCents) cents = -dsp::kMaxTransposeCents;
+    return cents;
+}
 void follow_notes(u32 t) {
     if (studio.track >= 8) return;   // the auxiliary and FX tracks: no notes to follow
     if (t - hold_sent_ms >= kHoldResendMs) send_hold(studio.track + 1);
@@ -3656,7 +3677,9 @@ void follow_notes(u32 t) {
                 play_edit();
                 studio.edit.slice = kept;
             } else {
+                next_cents = note_cents(struck);   // A48
                 play_edit();
+                next_cents = 0;
             }
             play.by_note = play.on;
         }

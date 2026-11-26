@@ -21,6 +21,8 @@ int alias[24];                                           // a key on another pla
 int fold_into = -1;                                      // put_file on an empty key lands in this place's region
 opxy::u32 relists, rescans;                              // the library listed again, the preset index built again
 bool off_top;                                            // another browser (presets) on the shared screen
+bool drum;                                               // the track is a drum sampler, Drumline or a synthesis kit
+opxy::u32 held_note = 128;                               // the note held on the track (128: none)
 }
 
 namespace opxy { namespace studio {
@@ -46,6 +48,7 @@ bool library_on_top() { return !harness::off_top; }
 bool library_busy() { return false; }
 u32 selected_track() { return 0; }
 u32 sample_engine(u32) { return harness::engine; }
+bool drum_track(u32) { return harness::drum; }
 u32 selected_key(u32) { return 60; }
 bool shift_held() { return harness::shift; }
 u32 project_bpm_x10() { return 1200; }
@@ -63,7 +66,7 @@ void stop_audition() {}
 void relist_library() { ++harness::relists; }
 void rescan_presets() { ++harness::rescans; }
 u32 note_serial(u32) { return harness::notes; }
-bool note_held(u32, u32) { return false; }
+bool note_held(u32, u32 note) { return note == harness::held_note; }
 unsigned char* key_entry(u32, u32 key) {
     if (key < 53 || key >= 77) return nullptr;
     if (harness::alias[key - 53] >= 0) return harness::kit[harness::alias[key - 53]];

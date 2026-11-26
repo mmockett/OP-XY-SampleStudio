@@ -31,7 +31,9 @@ encoder to switch rows. Hold Shift and M1 to M4 become undo, compare (the
 original), play (the edit) and save.
 
 While the studio is open, the track's keys and the sequencer play the edit at
-the key's own level, and stop when you let go. Every change is heard at once,
+the key's own level and the pitch the track would play it: on a sampler or
+multisampler a key above the sample's root plays higher, and a drum track's
+pads keep their own pitch. Notes stop when you let go. Every change is heard at once,
 except beat-mode retime, which renders first and plays what's ready as it goes.
 
 ### Trim

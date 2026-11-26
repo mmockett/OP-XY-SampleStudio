@@ -430,6 +430,71 @@ void leave_checks() {
     harness::off_top = false;
     std::printf("leaving for another browser (checked)\n");
 }
+
+// A48: a note plays the edit as the track would. The play command carries the transposition in
+// B3 139's top half (channel 1); the playhead moves at the transposed rate; prints, saves and the
+// play button never carry it.
+i32 sent_cents() { return static_cast<i32>(static_cast<opxy::i16>(static_cast<u32>(harness::sent[1]) >> 16)); }
+i32 note_cents_heard(u32 note) {
+    harness::held_note = note;
+    harness::notes += 1;
+    harness::clock += 20;
+    play.on = false;
+    follow_notes(harness::clock);
+    harness::held_note = 128;
+    harness::clock += 200;
+    note_struck(harness::clock);   // the note let go, so the next one is struck afresh
+    EXPECT(play.on);
+    return sent_cents();
+}
+void pitch_checks() {
+    // a sampler key whose root is 48 (C3): C4 an octave up, C2 an octave down, C3 as it is
+    open_scene(kTrim);
+    studio.file_only = studio.on_key = false;
+    std::memset(studio.origin, 0, sizeof studio.origin);
+    studio.origin[24] = 48;
+    harness::drum = false;
+    harness::engine = opxy::studio::engine_sampler;
+    note_struck(harness::clock);
+    EXPECT(note_cents_heard(60) == 1200);
+    EXPECT(play.rate == 88200);                  // the playhead runs twice as fast
+    EXPECT(note_cents_heard(36) == -1200);
+    EXPECT(play.rate == 22050);
+    EXPECT(note_cents_heard(48) == 0);
+    // fine tuning counts too, and stock's two octaves bound it
+    studio.origin[28] = static_cast<unsigned char>(-25);
+    EXPECT(note_cents_heard(49) == 75);
+    studio.origin[28] = 0;
+    EXPECT(note_cents_heard(96) == 2400);
+    // a drum track's pads stay at their own pitch
+    harness::drum = true;
+    EXPECT(note_cents_heard(60) == 0 && note_cents_heard(72) == 0);
+    harness::drum = false;
+    // a file on no key: from middle C
+    studio.file_only = true;
+    EXPECT(note_cents_heard(72) == 1200 && note_cents_heard(60) == 0);
+    studio.file_only = false;
+    // the play button: the file's own pitch, whatever note came before
+    note_cents_heard(72);
+    play.on = false;
+    play_edit();
+    EXPECT(play.on && sent_cents() == 0 && play.rate == 44100);
+    // a save renders the same edit after a high note as after the root: the transposition never
+    // reaches the edit or the render
+    note_cents_heard(48);
+    const Edit at_root = studio.edit;
+    busy = 0;
+    start_render(kToSave);
+    const Edit render_at_root = render.edit;
+    const u32 source_at_root = render.key;
+    busy = 0;
+    note_cents_heard(84);
+    EXPECT(same_edit(studio.edit, at_root));
+    start_render(kToSave);
+    EXPECT(same_edit(render.edit, render_at_root) && render.key == source_at_root);
+    busy = 0;
+    std::printf("notes at the track's pitch (checked)\n");
+}
 }}}}}  // namespace opxy::extensions::sample_studio::edit::scenes
 
 int main(int argc, char** argv) {
@@ -438,5 +503,6 @@ int main(int argc, char** argv) {
     opxy::extensions::sample_studio::edit::scenes::kit_checks();
     opxy::extensions::sample_studio::edit::scenes::earlier_checks();
     opxy::extensions::sample_studio::edit::scenes::leave_checks();
+    opxy::extensions::sample_studio::edit::scenes::pitch_checks();
     return 0;
 }

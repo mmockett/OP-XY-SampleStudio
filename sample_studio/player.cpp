@@ -157,7 +157,12 @@ typedef void File;
 struct Command {
     u32 serial, flags, mode, track, which, start, end;
     i32 level;
+    i32 cents;   // P16: the audition's transposition (the key's note against its root), 0 for prints
 };
+// ---- P16: a note plays the edit as the track would, transposed by its note against the key's root
+// (editor.cpp A48): the plain play by its step, the live chain inside its tape-speed stage, so the
+// chain's colour stages still run once a frame at the source's rate however far the note is from
+// the root. Prints and saves never carry it. -2400..2400 cents (stock's ±24 semitones, dsp::kMaxTransposeCents).
 // ---- P9: the live chain's settings, as the writer takes them
 struct Live {
     dsp::Settings s;
@@ -241,6 +246,8 @@ bool rs_primed;
 struct Report {
     u32 serial, mode, which, start_blocks, frames, rate, channels, peak, voice_peak, worst_cycles, mean_cycles;
     u32 setting[8];     // P9: the live chain's stretch, rate, bits, drive, sweep, comp, dc, source rate
+    i32 cents;          // P16: the play's transposition
+    u32 speed;          // P16: and the step it gave (the plain play's, or the chain's tape stage), Q16
     bool started, starved;
 } report;
 volatile i32 track_gain, track_level;   // stock's gain words for the held track (P4)
@@ -658,6 +665,7 @@ bool start(const Command& c) {
     player.pos = c.flags & kReverse ? c.end - 1 : c.start;
     player.frac = 0;
     player.step = ((player.rate << 10) / 44100u) << 6;   // input frames per output frame, Q16
+    if (c.cents) player.step = dsp::mul_q16(player.step, dsp::transpose_q16(c.cents));   // P16
     player.gain = level_gain(c.level);
     player.ramp = 0;
     player.stopping = false;
@@ -666,6 +674,8 @@ bool start(const Command& c) {
     report.start_blocks = blocks - report.start_blocks;   // blocks from the command to the start
     report.rate = player.rate;
     report.channels = player.channels;
+    report.cents = c.cents;
+    report.speed = player.live ? chain.speed_q16 : player.step;
     return true;
 }
 // P9: the newest settings, if a whole set has been published.
@@ -707,7 +717,17 @@ bool start_live(const Command& c) {
     player.key = c.which;
     player.channels = view.channels;
     player.rate = view.rate;
+    u32 ratio = 65536u;
+    if (c.cents) {
+        // P16: the chain's output, and the fades on it, shorten or lengthen with the transposition
+        ratio = dsp::transpose_q16(c.cents);
+        l.frames = dsp::frames_over(l.frames, ratio);
+        l.fade_in = dsp::frames_over(l.fade_in, ratio);
+        l.fade_out = dsp::frames_over(l.fade_out, ratio);
+        if (!l.frames) l.frames = 1;
+    }
     chain.start(view.data, view.channels, view.rate, l.s);
+    if (ratio != 65536u) chain.speed_q16 = dsp::mul_q16(chain.speed_q16, ratio);
     chain_now = chain_target = l;
     chain_out = 0;
     chain_at = chain_count = 0;
@@ -881,6 +901,9 @@ void log_command(const Command& c) {
                  "peaked %d; track gain %x, dry level %x", static_cast<int>(report.start_blocks), static_cast<int>(report.rate),
                  static_cast<int>(report.channels), static_cast<int>(report.voice_peak >> 16), track_gain, track_level);
     }
+    if (report.serial && report.cents)
+        log_line(__LINE__, "player: play %d transposed %d cents (the note against the key's root), step %x", static_cast<int>(report.serial),
+                 report.cents, static_cast<i32>(report.speed), 0, 0, 0);
     if (report.serial && (report.mode == kLive || report.mode == kLiveFile)) {
         log_line(__LINE__, "player: play %d live: the chain's block took %d cycles at worst, %d on average (of %d a block)",
                  static_cast<int>(report.serial), static_cast<int>(report.worst_cycles), static_cast<int>(report.mean_cycles),
@@ -1017,7 +1040,12 @@ void receive(u32 channel, i32 value) {
         return;
     }
     if (!staging) return;
-    if (id == kSource) { staged.mode = v & 0xffu; staged.track = (v >> 8) & 0xffu; staged_mask |= 2; }
+    if (id == kSource) {
+        staged.mode = v & 0xffu;
+        staged.track = (v >> 8) & 0xffu;
+        staged.cents = static_cast<i32>(static_cast<opxy::i16>(v >> 16));   // P16
+        staged_mask |= 2;
+    }
     else if (id == kWhich) { staged.which = v; staged_mask |= 4; }
     else if (id == kStart) { staged.start = v; staged_mask |= 8; }
     else if (id == kEnd) { staged.end = v; staged_mask |= 16; }

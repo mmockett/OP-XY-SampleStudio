@@ -151,6 +151,48 @@ void the_block_form_makes_the_same_words() {
     }
 }
 
+// A note's transposition (editor.cpp A48, player.cpp P16): the ratio, its products and the frame
+// counts it scales against 64-bit arithmetic, and the tape stage at a transposed speed: an octave up
+// plays every other source frame, so half as many, each the source's own.
+void a_note_transposes_in_the_tape_stage() {
+    CHECK(transpose_q16(0) == 65536u && transpose_q16(1200) == 131072u && transpose_q16(-1200) == 32768u);
+    CHECK(transpose_q16(2400) == 262144u && transpose_q16(-2400) == 16384u && transpose_q16(9000) == 262144u);
+    u32 last = 0;
+    for (i32 c = -2400; c <= 2400; c += 5) {
+        const u32 r = transpose_q16(c);
+        CHECK(r > last);   // rises with every 5 cents
+        last = r;
+    }
+    // 50 cents: 2^(1/24) = 1.029302 (Q16 67455)
+    CHECK(transpose_q16(50) >= 67450u && transpose_q16(50) <= 67460u);
+    const u32 as[] = {1u, 65536u, 285000u, 4000000u}, bs[] = {16384u, 65536u, 98304u, 262144u, 300000u};
+    for (u32 i = 0; i < 4; ++i)
+        for (u32 j = 0; j < 5; ++j) {
+            const unsigned long long want = static_cast<unsigned long long>(as[i]) * bs[j] >> 16;
+            CHECK(mul_q16(as[i], bs[j]) == static_cast<u32>(want));
+        }
+    const u32 ns[] = {0u, 1u, 7469u, 95932u, 4000000u};
+    for (u32 i = 0; i < 5; ++i)
+        for (u32 j = 0; j < 5; ++j) {
+            const unsigned long long want = (static_cast<unsigned long long>(ns[i]) << 16) / bs[j];
+            CHECK(frames_over(ns[i], bs[j]) == static_cast<u32>(want));
+        }
+    make_tone(1);
+    Settings s = plain();
+    static Pipeline p;
+    p.start(pcm, 1, kRate, s);
+    p.speed_q16 = mul_q16(p.speed_q16, transpose_q16(1200));
+    i32 w[2];
+    u32 n = 0;
+    while (p.next(w)) {
+        CHECK(w[0] == pcm[s.begin + 2 * n] * 65536);
+        ++n;
+    }
+    const u32 source = s.end - s.begin;
+    CHECK(n + 2 >= source / 2 && n <= source / 2 + 1);
+    CHECK(frames_over(source, transpose_q16(1200)) == source / 2);
+}
+
 void a_save_normalises_and_names_itself() {
     using namespace opxy::sample_bake;
     CHECK(normalise_gain(0, kTarget) == kUnity);                   // silence: no gain
@@ -195,6 +237,7 @@ int main() {
     tape_speed_sets_the_length();
     beat_sets_the_length_and_the_pitch_apart();
     the_block_form_makes_the_same_words();
+    a_note_transposes_in_the_tape_stage();
     a_save_normalises_and_names_itself();
     std::printf("Sample Studio chain: all checks passed\n");
     return 0;

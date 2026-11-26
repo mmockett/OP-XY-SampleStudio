@@ -28,6 +28,37 @@ const u32 kSemitoneQ16[49] = {
     77936u, 82570u, 87480u, 92682u, 98193u, 104032u, 110218u, 116772u, 123715u,
     131072u, 138866u, 147123u, 155872u, 165140u, 174960u, 185364u, 196386u, 208064u,
     220436u, 233544u, 247431u, 262144u};
+// a * b / 2^16 for a below 2^22 and b below 2^19, in 32-bit products
+inline u32 mul_q16(u32 a, u32 b) {
+    const u32 ah = a >> 16, al = a & 0xffffu, bh = b >> 16, bl = b & 0xffffu;
+    return a * bh + ah * bl + ((al * bl) >> 16);
+}
+// floor(n * 2^16 / r), shift and subtract (n below 2^24, r a ratio in Q16)
+inline u32 frames_over(u32 n, u32 r) {
+    if (!r) return n;
+    u32 q = 0, rem = 0;
+    for (i32 bit = 39; bit >= 0; --bit) {
+        rem = (rem << 1) | (bit >= 16 ? (n >> (bit - 16)) & 1u : 0u);
+        q <<= 1;
+        if (rem >= r) {
+            rem -= r;
+            q |= 1u;
+        }
+    }
+    return q;
+}
+// An audition's transposition (editor.cpp A48, player.cpp P16): stock's range, two octaves either way.
+const i32 kMaxTransposeCents = 2400;
+// 2^(cents / 1200) in Q16: the nearest semitone from the table above, the rest of a semitone by
+// its series to the square (1 + x + x^2/2, x = c ln 2 / 1200): within 0.05 cent, Q16 rounding included.
+inline u32 transpose_q16(i32 cents) {
+    if (cents < -kMaxTransposeCents) cents = -kMaxTransposeCents;
+    if (cents > kMaxTransposeCents) cents = kMaxTransposeCents;
+    const i32 semis = (cents >= 0 ? cents + 50 : cents - 50) / 100;
+    const i32 rest = cents - semis * 100;   // -50..50
+    const u32 fine = static_cast<u32>(65536 + rest * 37856 / 1000 + rest * rest * 10934 / 1000000);
+    return mul_q16(kSemitoneQ16[semis + 24], fine);
+}
 // The process page's filter sweep: 48 cutoffs from 50 Hz to 12 kHz, log spaced, as
 // f = 2 sin(pi fc / 88200) in Q31 for a state-variable filter run twice a frame
 // at 44.1 kHz (other rates move the cutoff with them).
