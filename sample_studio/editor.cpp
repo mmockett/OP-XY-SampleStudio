@@ -1863,6 +1863,8 @@ void undo_step() {
                 if (entry) copy_bytes(entry, kit_undo.entries[k], kEntryBytes);
             }
             send_regions(kit_undo.track, true);
+            log(__LINE__, "undo: this kit, %d keys as before from key %d", static_cast<int>(kit_undo.count),
+                static_cast<int>(kit_undo.count ? kit_undo.notes[0] : 0));
             kit_undo.valid = false;
             set_card("keys as before", "", 1500);
         }
@@ -4195,12 +4197,18 @@ bool frame(i32 elapsed) {
         log(__LINE__, "hooked: the library's keys and the browser frame; label on");
     }
     if (!library_on_top()) {
-        if (studio.mode == kOpen || studio.mode == kLeaving || studio.mode == kSliceChoice || bounce.on) close_studio(true);
+        if (studio.mode == kOpen || studio.mode == kLeaving || studio.mode == kSliceChoice || bounce.on) {
+            log(__LINE__, "the library left the screen (another browser): closing");
+            close_studio(true);
+        }
         studio.library_visible = false;
         return false;
     }
     if (!studio.library_visible || t - studio.library_seen_ms > kGapMs) {
-        if (studio.mode == kOpen || studio.mode == kLeaving || studio.mode == kSliceChoice || bounce.on) close_studio(true);
+        if (studio.mode == kOpen || studio.mode == kLeaving || studio.mode == kSliceChoice || bounce.on) {
+            log(__LINE__, "the library back after %d ms away: closing", static_cast<int>(t - studio.library_seen_ms));
+            close_studio(true);
+        }
         take_snapshot();
     }
     studio.library_visible = true;
