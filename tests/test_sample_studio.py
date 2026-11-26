@@ -1801,8 +1801,10 @@ class OnePassSaves(unittest.TestCase):
 
     def test_this_kit_on_fewer_pads_and_the_studio_stays(self):
         kit = self.body('void load_kit() {')
-        self.assertIn('else if (!note_of[at / kEntryBytes]) {', kit)
-        self.assertIn('while (count < render.cut_count && first + count < 24 && note_of[first + count]) ++count;', kit)
+        # pads in key order: a key with its own region (not on another key's) or with none; from the selected
+        # key up (the harness runs this on fresh, partial and full kits)
+        self.assertIn('for (u32 j = 0; found[k] && j < k && !shared; ++j) shared = found[j] == found[k];', kit)
+        self.assertIn('u32 count = pads - first < render.cut_count ? pads - first : render.cut_count;', kit)
         self.assertNotIn('copy_text(studio.path, render.slice_paths[0]', kit)
         self.assertNotIn('forget_preview();', kit)
         self.assertIn('log(__LINE__, "kit: the studio stays on %s", studio.path);', kit)

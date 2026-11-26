@@ -268,33 +268,75 @@ void file_mode_checks() {
     std::printf("file mode (checked)\n");
 }
 
-// "This kit" onto a fresh kit: stock's new kit sets up only the pads it has loaded (here pad 1), and
-// every slice still gets a pad of its own; onto a full kit, the same pads as before.
+// "This kit": the slices go on the kit's pads from the selected key up, in key order. A pad is a key
+// with its own region or a key with no region at all (stock's new kit sets up only the pads it has
+// loaded); a key on another key's region isn't one.
+void kit_reset(const bool* loaded, u32 slot, u32 slices) {
+    std::memset(harness::kit, 0, sizeof harness::kit);
+    std::memset(harness::put, 0, sizeof harness::put);
+    for (u32 k = 0; k < 24; ++k) {
+        harness::has[k] = loaded[k];
+        harness::alias[k] = -1;
+    }
+    harness::fold_into = -1;
+    render.new_kit = false;
+    render.engine = kDrumSampler;
+    render.track = 3;
+    render.slot = slot;
+    render.cut_count = slices;
+    for (u32 k = 0; k < slices; ++k) {
+        std::snprintf(render.slice_paths[k], sizeof render.slice_paths[k], "/fat32/samples/user/break-s%u.wav",
+                      static_cast<unsigned>(k + 1));
+        render.slice_frames[k] = 1000 * (k + 1);
+    }
+    slices_to_kit = true;
+    studio.on_key = true;
+}
+// The slice on each key, or 0 for none: the number in its file name.
+u32 slice_on(u32 key) {
+    const unsigned char* e = host::key_entry(3, key);
+    if (!e) return 0;
+    const char* name = host::entry_path(e);
+    const char* s = std::strstr(name, "break-s");
+    return s ? static_cast<u32>(std::atoi(s + 7)) : 0;
+}
 void kit_checks() {
+    bool loaded[24];
+    // a fresh kit with pad 1 loaded, and a full kit: slices 1..8 on keys 53..60, each at root 60, fine 0
     for (u32 full = 0; full < 2; ++full) {
-        std::memset(harness::kit, 0, sizeof harness::kit);
-        std::memset(harness::put, 0, sizeof harness::put);
-        for (u32 k = 0; k < 24; ++k) harness::has[k] = full || k == 0;
-        render.new_kit = false;
-        render.engine = kDrumSampler;
-        render.track = 3;
-        render.slot = 53;
-        render.cut_count = 8;
-        for (u32 k = 0; k < render.cut_count; ++k) {
-            std::snprintf(render.slice_paths[k], sizeof render.slice_paths[k], "/fat32/samples/user/break-s%u.wav",
-                          static_cast<unsigned>(k + 1));
-            render.slice_frames[k] = 1000 * (k + 1);
-        }
-        slices_to_kit = true;
-        studio.on_key = true;
+        for (u32 k = 0; k < 24; ++k) loaded[k] = full || k == 0;
+        kit_reset(loaded, 53, 8);
         load_kit();
         for (u32 k = 0; k < 24; ++k) EXPECT(harness::put[k] == (k < 8 ? 1u : 0u));
-        for (u32 k = 0; k < 8; ++k) EXPECT(!std::strcmp(host::entry_path(harness::kit[k]), render.slice_paths[k]));
-        EXPECT(kit_undo.valid && kit_undo.count == 8);
-        // each slice at its own pitch: root 60, fine 0 (an empty key's 0, 0 plays two octaves up)
+        for (u32 k = 0; k < 8; ++k) EXPECT(slice_on(53 + k) == k + 1);
         for (u32 k = 0; k < 8; ++k) EXPECT(harness::kit[k][24] == 60 && harness::kit[k][28] == 0);
+        EXPECT(kit_undo.valid && kit_undo.count == 8);
     }
-    std::printf("this kit on a fresh kit (checked)\n");
+    // the one loaded pad on key 60, selected: slices on 60, 61, 62 ...
+    for (u32 k = 0; k < 24; ++k) loaded[k] = k == 7;
+    kit_reset(loaded, 60, 8);
+    load_kit();
+    for (u32 k = 0; k < 8; ++k) EXPECT(slice_on(60 + k) == k + 1);
+    EXPECT(slice_on(54) == 0 && slice_on(59) == 0);
+    // pads on 53 and 55 loaded, 53 selected: 54 is an empty pad of its own, slice 2 goes there
+    for (u32 k = 0; k < 24; ++k) loaded[k] = k == 0 || k == 2;
+    kit_reset(loaded, 53, 4);
+    load_kit();
+    for (u32 k = 0; k < 4; ++k) EXPECT(slice_on(53 + k) == k + 1);
+    // keys sharing pad 1's region aren't pads: nothing goes there, and pad 1 keeps slice 1
+    for (u32 k = 0; k < 24; ++k) loaded[k] = k == 0 || k >= 4;
+    kit_reset(loaded, 53, 4);
+    harness::alias[1] = harness::alias[2] = harness::alias[3] = 0;
+    load_kit();
+    EXPECT(slice_on(53) == 1 && harness::put[1] == 0 && slice_on(57) == 2);
+    // stock putting an empty key's file into pad 1's region: pad 1 gets slice 1 back, the rest stay files
+    for (u32 k = 0; k < 24; ++k) loaded[k] = k == 0;
+    kit_reset(loaded, 53, 4);
+    harness::fold_into = 0;
+    load_kit();
+    harness::fold_into = -1;
+    EXPECT(slice_on(53) == 1 && kit_undo.count == 1);
+    std::printf("this kit on fresh, partial and full kits (checked)\n");
 }
 
 // Earlier device faults, as behaviour.
@@ -344,6 +386,14 @@ void earlier_checks() {
     load_kit();
     EXPECT(studio.mode == kOpen && harness::rescans == 1);
     render.new_kit = false;
+    // Turns at positions the library reports past the four encoders: taken while the studio is open
+    // (stock's list stays put under it) and acting on nothing; stock's while it is closed.
+    open_scene(kTrim);
+    const Edit before = studio.edit;
+    EXPECT(turn_encoder(5, 1) && turn_encoder(9, -2));
+    EXPECT(same_edit(studio.edit, before));
+    close_studio(false);
+    EXPECT(!turn_encoder(5, 1));
     std::printf("earlier device faults (checked)\n");
 }
 

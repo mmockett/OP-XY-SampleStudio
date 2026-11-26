@@ -17,6 +17,8 @@ bool sent_on[15];
 unsigned char kit[24][opxy::studio::entry_bytes];
 bool has[24];
 opxy::u32 put[24];                                       // put_file calls per key
+int alias[24];                                           // a key on another place's region (-1: none)
+int fold_into = -1;                                      // put_file on an empty key lands in this place's region
 opxy::u32 relists, rescans;                              // the library listed again, the preset index built again
 bool off_top;                                            // another browser (presets) on the shared screen
 }
@@ -63,7 +65,9 @@ void rescan_presets() { ++harness::rescans; }
 u32 note_serial(u32) { return harness::notes; }
 bool note_held(u32, u32) { return false; }
 unsigned char* key_entry(u32, u32 key) {
-    return key >= 53 && key < 77 && harness::has[key - 53] ? harness::kit[key - 53] : nullptr;
+    if (key < 53 || key >= 77) return nullptr;
+    if (harness::alias[key - 53] >= 0) return harness::kit[harness::alias[key - 53]];
+    return harness::has[key - 53] ? harness::kit[key - 53] : nullptr;
 }
 const char* entry_path(const unsigned char* entry) { return reinterpret_cast<const char*>(entry + 0x20); }
 i32 entry_frames(const unsigned char*) { return 0; }
@@ -80,9 +84,12 @@ void set_entry_tuning(unsigned char* entry, u32 root, i32 fine) {
 void set_entry_whole(unsigned char*, u32) {}
 bool put_file(u32, u32, u32 key, const char* path, u32, u32) {
     if (key < 53 || key >= 77) return false;
-    harness::has[key - 53] = true;
     ++harness::put[key - 53];
-    char* name = reinterpret_cast<char*>(harness::kit[key - 53] + 0x20);
+    u32 place = key - 53;
+    if (harness::alias[place] >= 0) place = static_cast<u32>(harness::alias[place]);
+    else if (!harness::has[place] && harness::fold_into >= 0) place = static_cast<u32>(harness::alias[key - 53] = harness::fold_into);
+    else harness::has[place] = true;
+    char* name = reinterpret_cast<char*>(harness::kit[place] + 0x20);
     u32 n = 0;
     for (; path[n] && n + 1 < path_bytes; ++n) name[n] = path[n];
     name[n] = 0;

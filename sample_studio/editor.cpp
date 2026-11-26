@@ -1712,9 +1712,15 @@ bool open_studio(u32 track, u32 engine, u32 slot) {
         studio.edit = edit_from(studio.origin);
         studio.opened = studio.edit;
     }
+    const bool kept = pending.valid && same_edit(studio.edit, pending.edit);
     pending.valid = false;
     log(__LINE__, "open %s: track %d key %d, %d frames, markers %d..%d", studio.path, static_cast<int>(track),
         static_cast<int>(slot), frames_of(entry), static_cast<int>(studio.edit.start), static_cast<int>(studio.edit.end));
+    // what decides pitch: the key's tuning (stock plays the key by it; the studio plays at the file's own
+    // pitch) and the edit's speed (tape: pitch with it), and whether a kept edit came back
+    log(__LINE__, "open: root %d fine %d, speed %d %s%s", static_cast<int>(host::entry_root(entry)),
+        static_cast<int>(host::entry_fine(entry)), static_cast<int>(studio.edit.stretch), studio.edit.beat ? "beat" : "tape",
+        kept ? ", the edit kept from before" : "");
     begin_studio(track, false);
     return true;
 }
@@ -1982,95 +1988,79 @@ void load_kit() {
         set_card(line, base_name(render.slice_paths[0]), 2500);
         return;
     }
-    // a drum sampler: the slices on the keys from this one up. render.slot is the selected key's
-    // note (A28); the kit's 24 keys are the notes stock folds onto its 24 region entries, so find
-    // each key's note by its entry's place among them (entries sit kEntryBytes apart)
-    u32 note_of[24];
-    unsigned char* base = nullptr;
+    // a drum sampler: the slices on the kit's pads from the selected one up, in key order (keys 53 up).
+    // A pad is a key with its own region (the first key on that region; A42: a kit with fewer pads gives
+    // some keys another key's region, and those aren't pads), or a key with no region at all: a fresh
+    // kit's empty pad (stock's new kit sets up only the pads it has loaded), given its slice as stock's
+    // library gives a sample to an empty pad. render.slot is the selected key's note (A28).
     unsigned char* found[24];
-    for (u32 k = 0; k < 24; ++k) {
-        found[k] = region_entry(render.track, 53 + k);
-        if (found[k] && (!base || found[k] < base)) base = found[k];
-    }
-    bool laid_out = true;   // a kit with no region yet is all fresh pads (below)
-    for (u32 k = 0; k < 24; ++k) note_of[k] = 0;
-    // A42 (e.g. a kit New kit made, 8 pads): a kit with fewer pads than keys gives
-    // some keys no entry or another key's; a pad is the first key whose entry is that place, the rest are files
-    u32 pads = 0;
-    for (u32 k = 0; k < 24 && laid_out; ++k) {
-        if (!found[k]) continue;
-        const u32 at = static_cast<u32>(found[k] - base);
-        if (at % kEntryBytes || at / kEntryBytes >= 24) laid_out = false;
-        else if (!note_of[at / kEntryBytes]) {
-            note_of[at / kEntryBytes] = 53 + k;
-            ++pads;
-        }
-    }
-    // A fresh kit (stock's new kit sets up only the pads it has loaded): a key with no region at all
-    // is a pad of its own, given its slice as stock's library gives a sample to an empty pad. A key
-    // that shares another key's region stays out: a file put there would replace that pad's too.
+    for (u32 k = 0; k < 24; ++k) found[k] = region_entry(render.track, 53 + k);
+    u32 pad_keys[24];
     bool fresh_pad[24];
-    u32 lacking = 0, sharing = 0;
-    for (u32 k = 0; k < 24; ++k) fresh_pad[k] = false;
-    for (u32 k = 0; k < 24 && laid_out; ++k) {
-        if (found[k]) {
-            if (note_of[static_cast<u32>(found[k] - base) / kEntryBytes] != 53 + k) ++sharing;
+    u32 pads = 0, lacking = 0, sharing = 0;
+    for (u32 k = 0; k < 24; ++k) {
+        bool shared = false;
+        for (u32 j = 0; found[k] && j < k && !shared; ++j) shared = found[j] == found[k];
+        if (shared) {
+            ++sharing;
             continue;
         }
-        ++lacking;
-        if (!note_of[k]) {
-            note_of[k] = 53 + k;
-            fresh_pad[k] = true;
-        }
+        if (!found[k]) ++lacking;
+        fresh_pad[pads] = !found[k];
+        pad_keys[pads++] = 53 + k;
     }
-    if (lacking || sharing)
-        log(__LINE__, "kit: %d keys without a region (pads of their own now), %d sharing another's", static_cast<int>(lacking),
-            static_cast<int>(sharing));
-    unsigned char* selected_entry = region_entry(render.track, render.slot);
-    u32 first = laid_out && selected_entry && selected_entry >= base ? static_cast<u32>(selected_entry - base) / kEntryBytes : 24;
-    if (!selected_entry && render.slot >= 53 && render.slot < 77 && fresh_pad[render.slot - 53]) first = render.slot - 53;   // an empty pad selected
-    if (first >= 24 || !note_of[first]) {
-        log(__LINE__, "kit: its keys aren't laid out as expected: the slices stay files");
+    u32 first = pads;
+    for (u32 q = 0; q < pads; ++q)
+        if (pad_keys[q] == render.slot) first = q;
+    if (first >= pads || fresh_pad[first]) {
+        log(__LINE__, "kit: the selected key %d isn't one of its pads: the slices stay files", static_cast<int>(render.slot));
         set_card("slices saved as files", "kit keys not found", 3000);
         return;
     }
-    u32 count = 0;   // the pads from the selected one up, to the first place with no pad
-    while (count < render.cut_count && first + count < 24 && note_of[first + count]) ++count;
-    if (pads < 24)
-        log(__LINE__, "kit: %d pads (%d keys share or lack one): %d slices from pad %d", static_cast<int>(pads),
-            static_cast<int>(24 - pads), static_cast<int>(count), static_cast<int>(first + 1));
+    u32 count = pads - first < render.cut_count ? pads - first : render.cut_count;   // the pads from the selected one up
+    log(__LINE__, "kit: %d pads (%d keys without a region, %d sharing another's): %d slices from key %d",
+        static_cast<int>(pads), static_cast<int>(lacking), static_cast<int>(sharing), static_cast<int>(count),
+        static_cast<int>(render.slot));
     kit_undo.valid = true;
     kit_undo.track = render.track;
     kit_undo.first = first;
     kit_undo.count = count;
     for (u32 k = 0; k < count; ++k) {
-        kit_undo.notes[k] = note_of[first + k];
-        unsigned char* entry = region_entry(render.track, note_of[first + k]);
+        const u32 note = pad_keys[first + k];
+        kit_undo.notes[k] = note;
+        unsigned char* entry = region_entry(render.track, note);
         if (entry) copy_bytes(kit_undo.entries[k], entry, kEntryBytes);
-        else for (u32 i = 0; i < kEntryBytes; ++i) kit_undo.entries[k][i] = 0;   // undo leaves an empty pad
+        else for (u32 i = 0; i < kEntryBytes; ++i) kit_undo.entries[k][i] = 0;   // undo leaves the pad empty
         if (k == 0) copy_bytes(kit_undo.entries[0], studio.on_key ? studio.key_entry : studio.origin, kEntryBytes);
-        const bool placed_ok = assign_file(render.track, kDrumSampler, note_of[first + k], render.slice_paths[k],
+        const bool placed_ok = assign_file(render.track, kDrumSampler, note, render.slice_paths[k],
                                            key_frames(render.slice_frames[k]), 60);
         if (fresh_pad[first + k]) {
-            // a pad of its own now, or the rest stay files
-            unsigned char* made = region_entry(render.track, note_of[first + k]);
-            bool own = placed_ok && made;
-            for (u32 j = 0; own && j < k; ++j) own = made != region_entry(render.track, note_of[first + j]);
-            if (!own) {
-                log(__LINE__, "kit: key %d took no region of its own: slices %d up stay files",
-                    static_cast<int>(note_of[first + k]), static_cast<int>(k + 1));
+            // a pad of its own now; if the file went into an earlier pad's region instead, that pad
+            // gets its own slice back and the rest stay files
+            unsigned char* made = region_entry(render.track, note);
+            u32 clash = k;
+            for (u32 j = 0; made && j < k && clash == k; ++j)
+                if (made == region_entry(render.track, pad_keys[first + j])) clash = j;
+            if (!placed_ok || !made || clash < k) {
+                log(__LINE__, "kit: key %d took no region of its own: slices %d up stay files", static_cast<int>(note),
+                    static_cast<int>(k + 1));
+                if (clash < k) {
+                    assign_file(render.track, kDrumSampler, pad_keys[first + clash], render.slice_paths[clash],
+                                key_frames(render.slice_frames[clash]), 60);
+                    if (unsigned char* back = region_entry(render.track, pad_keys[first + clash])) host::set_entry_tuning(back, 60, 0);
+                }
                 count = k;
-                kit_undo.count = placed_ok ? k + 1 : k;   // whatever the file changed, undo puts back
+                kit_undo.count = placed_ok && made && clash == k ? k + 1 : k;
                 break;
             }
         }
         // A34 (else slices on the kit play two octaves up): the drum
         // sampler's assignment leaves the key's root and fine as they were; a slice is at its own pitch
         // on root 60, fine 0, as stock's kits (zebra.json: pitch.keycenter 60, tune 0)
-        unsigned char* placed = region_entry(render.track, note_of[first + k]);
+        unsigned char* placed = region_entry(render.track, note);
         if (placed) {
             if (k < 3)
-                log(__LINE__, "kit: key %d was root %d fine %d; now 60, 0", static_cast<int>(note_of[first + k]),
+                log(__LINE__, "kit: key %d was root %d fine %d; now 60, 0", static_cast<int>(note),
                     static_cast<int>(host::entry_root(placed)), static_cast<int>(host::entry_fine(placed)));
             host::set_entry_tuning(placed, 60, 0);
         }
@@ -4169,8 +4159,8 @@ bool press_shift(u32 key) {
 bool release_key(u32 key) { return studio.mode != kClosed && owned(key); }
 bool turn_encoder(u32 encoder, i32 detents) {
     if (studio.mode == kClosed) return false;
-    if (studio.mode == kOpen) turn(encoder, detents);
-    return true;
+    if (studio.mode == kOpen && encoder < 4) turn(encoder, detents);
+    return true;   // open: every position is the studio's, so stock's list never moves under it
 }
 static bool hooked_said;
 // Every library frame: true when the studio drew it.
