@@ -518,7 +518,12 @@ class Preview(unittest.TestCase):
         close = re.search(r'void close_studio\(bool keep\) \{(.*?)\n\}', studio, re.S).group(1)
         self.assertIn('send_hold(0);', close)
         opened = re.search(r'void begin_studio\(u32 track, bool file\) \{(.*?)\n\}', studio, re.S).group(1)
-        self.assertIn('note_seen = keyless || track >= 8 ? 0 : track_notes();', opened)   # a sounding note doesn't play it
+        self.assertIn('note_seen = track >= 8 ? 0 : track_notes();', opened)   # a sounding note doesn't play it
+        # file mode too: the keys play the edit and the track's own engine is held (029 played the synth)
+        self.assertIn('if (track < 8) send_hold(track + 1);', opened)
+        self.assertNotIn('keyless', opened)
+        follow_head = re.search(r'void follow_notes\(u32 t\) \{\n(.*?)\n', studio).group(1)
+        self.assertEqual(follow_head.strip(), 'if (studio.track >= 8) return;   // the auxiliary and FX tracks: no notes to follow')
         # the audio board: the mixer's voice site hands the player each rendered voice, which zeroes
         # only the held track and lets go without a resend
         self.assertIn('    sdk_studio_voice(kVoiceOutput, track);\n', mixer)

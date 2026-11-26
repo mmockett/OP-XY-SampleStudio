@@ -4,10 +4,17 @@
 
 namespace harness {
 bool shift;
+opxy::u32 clock;                                         // now_ms()
+opxy::u32 engine = opxy::studio::engine_sampler;          // the selected track's sample engine
+const char* highlight = "";                              // the library's highlighted file ("" for none)
+bool highlight_seen;                                     // stock's record of the last highlighted file
+opxy::u32 notes;                                         // the track's note serial
+opxy::i32 sent[15];                                      // the last value sent on each channel
+bool sent_on[15];
 }
 
 namespace opxy { namespace studio {
-u32 now_ms() { return 0; }
+u32 now_ms() { return harness::clock; }
 u32 now_us() { return 0; }
 u32 cycles() { return 0; }
 void barrier() {}
@@ -28,20 +35,23 @@ void popup(const char*) {}
 bool library_on_top() { return true; }
 bool library_busy() { return false; }
 u32 selected_track() { return 0; }
-u32 sample_engine(u32) { return engine_sampler; }
+u32 sample_engine(u32) { return harness::engine; }
 u32 selected_key(u32) { return 60; }
 bool shift_held() { return harness::shift; }
 u32 project_bpm_x10() { return 1200; }
 u32 track_engine(u32) { return 0; }
 bool highlighted(char* out, u32 size) {
-    if (size) out[0] = 0;
-    return false;
+    if (!size) return false;
+    u32 n = 0;
+    for (; harness::highlight[n] && n + 1 < size; ++n) out[n] = harness::highlight[n];
+    out[n] = 0;
+    return n > 0;
 }
-bool highlight_seen() { return false; }
+bool highlight_seen() { return harness::highlight_seen; }
 void stop_audition() {}
 void relist_library() {}
 void rescan_presets() {}
-u32 note_serial(u32) { return 0; }
+u32 note_serial(u32) { return harness::notes; }
 bool note_held(u32, u32) { return false; }
 unsigned char* key_entry(u32, u32) { return nullptr; }
 const char* entry_path(const unsigned char*) { return ""; }
@@ -61,7 +71,12 @@ u32 sample_key(const char*) { return 0; }
 Borrowed borrow(u32) { return Borrowed{nullptr, 0, false}; }
 void release_sample(u32) {}
 SampleView sample_view(const void*) { return SampleView(); }
-void send(u32, i32) {}
+void send(u32 channel, i32 value) {
+    if (channel < 15) {
+        harness::sent[channel] = value;
+        harness::sent_on[channel] = true;
+    }
+}
 bool surface_ready(const char* const*, u32, u32, u32, u32) { return true; }
 void surface_present(const Surface&) {}
 void surface_blank() {}

@@ -225,9 +225,47 @@ void draw_all(const char* out) {
     if (!drawable(output)) { std::fprintf(stderr, "label: the SDK would not draw this frame\n"); std::exit(1); }
     std::printf("label (checked)\n");
 }
+
+// Behaviour the screens can't show, as the device saw it go wrong.
+#define EXPECT(condition) do { if (!(condition)) { std::fprintf(stderr, "harness.cpp:%d: %s\n", __LINE__, #condition); std::exit(1); } } while (0)
+bool shows_edit() { return !std::strcmp(output.texts[panel::T_M0].chars, "edit"); }
+void file_mode_checks() {
+    // A synth track's library, just opened on a file: stock hasn't recorded a highlight yet, but
+    // the label is there on the first frame.
+    close_studio(false);
+    studio.mode = kClosed;
+    harness::engine = 0;
+    harness::highlight_seen = false;
+    harness::highlight = "/fat32/samples/user/drum loop.wav";
+    harness::clock += 1000;
+    EXPECT(frame(16) && shows_edit());
+    // a folder highlighted: no label
+    harness::highlight = "";
+    harness::clock += 1000;
+    EXPECT(!frame(16));
+    // M1 opens the file; the track's own engine is held silent (B3 145 is channel 7) and a note plays the edit
+    harness::highlight = "/fat32/samples/user/drum loop.wav";
+    std::memset(harness::sent_on, 0, sizeof harness::sent_on);
+    EXPECT(open_file(0, harness::highlight));
+    EXPECT(studio.file_only && !studio.on_key);
+    EXPECT(harness::sent_on[7] && harness::sent[7] == 1);
+    studio.ready = true;   // the PCM in, as open_done leaves it: the whole file
+    studio.edit.start = 0;
+    studio.edit.end = kLoop;
+    studio.opened = studio.edit;
+    play.on = false;
+    harness::notes += 1;
+    harness::clock += 20;
+    follow_notes(harness::clock);
+    EXPECT(play.on && play.by_note);
+    close_studio(false);
+    EXPECT(harness::sent[7] == 0);   // the track sounds again
+    std::printf("file mode (checked)\n");
+}
 }}}}}  // namespace opxy::extensions::sample_studio::edit::scenes
 
 int main(int argc, char** argv) {
     opxy::extensions::sample_studio::edit::scenes::draw_all(argc > 1 ? argv[1] : ".");
+    opxy::extensions::sample_studio::edit::scenes::file_mode_checks();
     return 0;
 }

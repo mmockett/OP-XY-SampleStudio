@@ -53,7 +53,6 @@ using host::allocate;
 using host::release;
 using host::popup;
 using host::highlighted;
-using host::highlight_seen;
 using host::library_on_top;
 
 namespace {
@@ -352,8 +351,8 @@ bool guards_clear() { return !host::library_busy(); }
 //    the sampler or multisampler). Any other track opens the file the browser has highlighted, in
 //    file mode: its full path from stock's tree (8c0a84b4(&string, 8c0ad5dc()), as stock's own press
 //    reads it), its PCM from the cache, where the highlight has already put it (8c0a3054 -> desired
-//    list at priority 99); no key, so no hold and no notes;
-//    Save writes the file only.
+//    list at priority 99). There is no key, but the keys still play the edit with the track's own
+//    engine held silent, as on a sample key; Save writes the file only.
 bool selected(u32& track, u32& engine, u32& slot) {
     track = host::selected_track();
     if (track >= 8) return false;
@@ -1753,11 +1752,12 @@ void begin_studio(u32 track, bool file) {
     studio.gesture = -1;
     studio.undo_count = 0;
     clear_card();
-    const bool keyless = file && !studio.on_key;   // A31: a file for a key plays on the key, as a key's sample
-    note_seen = keyless || track >= 8 ? 0 : track_notes();
+    // A28: the keys play the edit on any track, a file's too, and the track's own engine is held
+    // silent while the studio is open (A31: a file for a key plays on the key, as a key's sample)
+    note_seen = track >= 8 ? 0 : track_notes();
     live_sent_valid = false;   // A24: the first play sends the whole set
     sends_valid = false;
-    if (!keyless) send_hold(track + 1);   // A28: a file's track plays as it is
+    if (track < 8) send_hold(track + 1);
     load_pcm();
     touched();
 }
@@ -3615,7 +3615,7 @@ u32 note_struck(u32 t) {
     return t - struck_ms <= kTapMs ? struck_note : 128;
 }
 void follow_notes(u32 t) {
-    if (studio.file_only && !studio.on_key) return;   // A28: no key, so no hold and no notes
+    if (studio.track >= 8) return;   // the auxiliary and FX tracks: no notes to follow
     if (t - hold_sent_ms >= kHoldResendMs) send_hold(studio.track + 1);
     const u32 serial = track_notes();
     const u32 struck = note_struck(t);
@@ -3925,10 +3925,25 @@ void label() {
     const bool needs_shift = ui == kDrumSampler || ui == kMultisampler;   // M1 is stock's previous key there
     if (!needs_shift || host::shift_held()) m_label(0, "edit");
 }
+// A28: a file highlighted in the library, asked of stock a few times a second while the studio is
+// closed. Stock's own record of the last highlighted file (highlight_seen) is written only once the
+// highlight moves, so a library just opened on a file has none.
+const u32 kHighlightCheckMs = 200;
+u32 highlight_checked_ms;
+bool highlight_now;
+bool file_highlighted() {
+    const u32 t = now_ms();
+    if (!highlight_checked_ms || t - highlight_checked_ms >= kHighlightCheckMs) {
+        char path[kPathBytes];
+        highlight_now = highlighted(path, sizeof path);
+        highlight_checked_ms = t ? t : 1;
+    }
+    return highlight_now;
+}
 bool label_wanted() {
     if (!guards_clear()) return false;
     u32 track, engine, slot;
-    return selected(track, engine, slot) || highlight_seen();   // A28: any track, a highlighted file
+    return selected(track, engine, slot) || file_highlighted();   // A28: any track, a highlighted file
 }
 void take_snapshot() {
     u32 track, engine, slot;
