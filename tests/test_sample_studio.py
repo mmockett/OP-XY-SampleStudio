@@ -113,11 +113,11 @@ class OptIn(unittest.TestCase):
 
         class Machine:
             kind = 'sample'
-            definition = {}
+            definition = {'resources': {}}
 
         class Synth:
             kind = 'synth'
-            definition = {}
+            definition = {'resources': {}}
         self.assertNotIn('sampleStudio', native.service_users([Machine()]))
         self.assertNotIn('sampleStudio', native.service_users(Built([Machine()])))
         self.assertIn('sampleStudio', native.service_users(Built([Machine()], [Studio()])))
@@ -634,7 +634,11 @@ class Preview(unittest.TestCase):
             self.assertLess(rate << 10, 1 << 32)
         profile = json.loads((ROOT / 'profiles/opxy-1.2.1.json').read_text())
         bus = [p for p in profile['patches'] if p.get('service') == 'master_bus']
-        self.assertEqual(sorted(p['address'] for p in bus), ['0x8d511b80', '0x8d5b145e'])
+        self.assertIn('0x8d511b80', [p['address'] for p in bus])   # the master EQ call
+        # the B3 receiver's call: the master bus's own record, or one it shares (the SDK's
+        # parameter_receive, with the device identity), entering sdk_master_receive for it
+        receive = next(p for p in profile['patches'] if p['address'] == '0x8d5b145e')
+        self.assertTrue(receive['service'] == 'master_bus' or receive.get('symbols', {}).get('master_bus') == 'sdk_master_receive')
         selection = (ROOT / 'tooling/extensions.py').read_text()
         self.assertIn("require(not (studios and processors),", selection)   # the two share these sites
 
