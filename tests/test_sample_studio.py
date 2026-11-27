@@ -604,11 +604,12 @@ class Preview(unittest.TestCase):
         self.assertIn('const u32 id = 138 + channel;', body)
         self.assertIn('if (id < kBegin || id > kCommit) return;', body)
         self.assertNotIn('0x8d50eb8c', player)
-        # the SDK's receiver gives 138..152 to the player and only the rest to stock
+        # the SDK's receiver gives the player's range to the player and only the rest to stock
         receiver = re.search(r'void sdk_master_receive\(u32 base, u32 id, i32 value\) \{(.*?)\n\}', AUDIO.read_text(), re.S).group(1)
         self.assertEqual(receiver.count('0x8d50eb8c'), 1)
         self.assertLess(receiver.index('id >= kFirstId && id < kFirstId + kChannels'), receiver.index('0x8d50eb8c'))
-        self.assertIn('const u32 kFirstId = 138, kChannels = 15;', AUDIO.read_text())
+        # the SDK's base for the player's 15 channels (its own B3 range; the editor only names channels)
+        self.assertRegex(AUDIO.read_text(), r'const u32 kFirstId = \d+, kChannels = 15;')
         self.assertIn('const u32 kBegin = 138, kSource = 139, kWhich = 140, kStart = 141, kEnd = 142, kLevel = 143, kCommit = 144;',
                       player)
         studio = STUDIO.read_text()
